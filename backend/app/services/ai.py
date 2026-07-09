@@ -31,6 +31,7 @@ from app.domain import (
     Language,
     MenuExtraction,
     SuggestedQuestions,
+    TranslatedQuestions,
     WatchChip,
 )
 from app.llm.clients import get_chat_client, get_embeddings_client
@@ -39,8 +40,10 @@ from app.llm.prompts import (
     EXTRACT_SYSTEM,
     EXTRACT_USER,
     SUGGEST_QUESTIONS_SYSTEM,
+    TRANSLATE_QUESTIONS_SYSTEM,
     enrich_user,
     suggest_questions_user,
+    translate_questions_user,
 )
 from app.models import EMBEDDING_DIM
 
@@ -71,7 +74,8 @@ class StubMenuAI:
                     name="Bacalhau à Brás", price=12.00, currency="EUR",
                     allergen_hints=["fish", "egg"],
                 ),
-            ]
+            ],
+            language="pt",  # the canned menu is Portuguese
         )
 
     async def enrich_dish(self, name: str, *, hints: list[str] | None = None) -> DishInfo:
@@ -120,7 +124,10 @@ class OpenAIMenuAI:
         llm = get_chat_client(settings.openai_extract_model).with_structured_output(
             MenuExtraction
         )
-        return await llm.ainvoke(messages)
+        extraction = await llm.ainvoke(messages)
+        if extraction.language:
+            extraction.language = extraction.language.strip().lower()[:2] or None
+        return extraction
 
     async def enrich_dish(self, name: str, *, hints: list[str] | None = None) -> DishInfo:
         messages = [
@@ -145,14 +152,26 @@ def get_menu_ai() -> MenuAI:
 
 
 class QuestionAI(Protocol):
-    """AI boundary of the "My questions" feature (Settings -> My questions):
-    suggest ask-the-staff questions from the user's "Watch out for" chips."""
+    """AI boundary of the "My questions" feature: suggest ask-the-staff
+    questions from the "Watch out for" chips, and translate saved questions
+    into the staff's language for the ask-staff sheet."""
 
     async def suggest_questions(
         self, chips: list[WatchChip], language: Language, existing: list[str]
     ) -> list[str]:
         """2-4 short questions in the user's language, none repeating
         `existing` (their already-saved questions)."""
+        ...
+
+    async def translate_questions(
+        self, texts: list[str], *, dish_name: str, origin: str | None, language: str | None
+    ) -> TranslatedQuestions:
+        """Translate each text into the staff's language, preserving order.
+
+        `language` is the menu's stored language (read off the photo during
+        extraction) — used verbatim when present; inferred from the dish and
+        origin when the menu didn't record one (older scans, unreadable photo).
+        """
         ...
 
 
@@ -175,6 +194,17 @@ class StubQuestionAI:
                 suggestions.append(text)
         return suggestions[:4]
 
+    async def translate_questions(
+        self, texts: list[str], *, dish_name: str, origin: str | None, language: str | None
+    ) -> TranslatedQuestions:
+        # Honors an explicit menu language, else "pt" — matches StubMenuAI's
+        # canned Portuguese menu (Francesinha, Bacalhau à Brás). The [lang]
+        # prefix makes it obvious in the UI that these are stub translations.
+        lang = language or "pt"
+        return TranslatedQuestions(
+            language=lang, translations=[f"[{lang}] {t}" for t in texts]
+        )
+
 
 class OpenAIQuestionAI:
     """ChatGPT-backed adapter, same structured-output pattern as OpenAIMenuAI."""
@@ -195,6 +225,25 @@ class OpenAIQuestionAI:
         )
         result = await llm.ainvoke(messages)
         return result.questions[:4]
+
+    async def translate_questions(
+        self, texts: list[str], *, dish_name: str, origin: str | None, language: str | None
+    ) -> TranslatedQuestions:
+        messages = [
+            SystemMessage(content=TRANSLATE_QUESTIONS_SYSTEM),
+            HumanMessage(content=translate_questions_user(texts, dish_name, origin, language)),
+        ]
+        llm = get_chat_client(settings.openai_enrich_model).with_structured_output(
+            TranslatedQuestions
+        )
+        result = await llm.ainvoke(messages)
+        # The sheet zips translations with the originals — never let a chatty
+        # model change the count. Missing entries fall back to the original.
+        result.language = result.language.strip().lower()[:2]
+        result.translations = (result.translations + texts[len(result.translations):])[
+            : len(texts)
+        ]
+        return result
 
 
 def get_question_ai() -> QuestionAI:

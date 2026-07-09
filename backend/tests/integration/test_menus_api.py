@@ -96,8 +96,9 @@ async def _seed_menu(
     name: str | None = None,
     created_at: datetime | None = None,
     scans: list[Scan] | None = None,
+    language: str | None = None,
 ) -> Menu:
-    menu = Menu(id=uuid.uuid4(), user_id=user_id, name=name)
+    menu = Menu(id=uuid.uuid4(), user_id=user_id, name=name, language=language)
     if created_at is not None:
         menu.created_at = created_at
     menu.scans = scans if scans is not None else []
@@ -223,6 +224,22 @@ class TestGetMenu:
 
         assert resp.status_code == 200
         assert resp.json()["id"] == str(menu.id)
+
+    async def test_includes_menu_language(self, client, db_session):
+        # Stored during extraction; the ask-staff sheet uses it as the
+        # translation target.
+        menu = await _seed_menu(db_session, language="pt")
+
+        resp = await client.get(f"/menus/{menu.id}")
+
+        assert resp.json()["language"] == "pt"
+
+    async def test_language_is_null_for_older_menus(self, client, db_session):
+        menu = await _seed_menu(db_session)  # scanned before languages existed
+
+        resp = await client.get(f"/menus/{menu.id}")
+
+        assert resp.json()["language"] is None
 
     async def test_owner_can_read_own_menu(self, client, db_session, make_user):
         alice = await make_user("alice")

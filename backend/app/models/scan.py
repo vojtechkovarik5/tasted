@@ -30,6 +30,10 @@ class Menu(Base):
     )
     name: Mapped[str | None] = mapped_column(String(255))  # restaurant name
     description: Mapped[str | None] = mapped_column(Text)
+    # ISO 639-1 the menu is printed in, read off the photo during extraction
+    # (first page wins). Drives ask-staff question translations. Null for
+    # menus scanned before this existed or when the AI couldn't tell.
+    language: Mapped[str | None] = mapped_column(String(2))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

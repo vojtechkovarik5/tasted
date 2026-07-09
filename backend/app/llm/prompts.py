@@ -12,6 +12,9 @@ sections if clearly separate, and prose.
 inferred from the symbol/context (€->EUR, Kč->CZK, £->GBP), else null.
 - `allergen_hints`: only allergens explicitly marked on the menu (icons, \
 footnote letters/numbers, "contains ..."). Do not guess from the dish name.
+- `language`: the ISO 639-1 code of the language the menu is printed in \
+("pt" for a Portuguese menu). For a multilingual menu, the primary/local \
+language. Null only if genuinely unreadable.
 Return nothing but the structured list."""
 
 EXTRACT_USER = "Extract every dish from this menu photo."
@@ -68,3 +71,27 @@ def suggest_questions_user(watch: list[str], language_name: str, existing: list[
             f"- {q}" for q in existing
         )
     return msg
+
+
+TRANSLATE_QUESTIONS_SYSTEM = """You help a traveler ask restaurant staff \
+about a dish. Given the dish (name, and origin if known) and the traveler's \
+questions:
+
+- `language`: the ISO 639-1 code of the language the restaurant's staff most \
+likely speaks. When the menu's language is given, use exactly that; \
+otherwise infer it from the dish and its origin ("Francesinha" -> "pt").
+- `translations`: every question translated into that language, same order — \
+natural, polite spoken phrasing a waiter understands at a glance. Keep them \
+short and unambiguous; phrasings answerable with yes/no are best.
+Return nothing but the structured result."""
+
+
+def translate_questions_user(
+    texts: list[str], dish_name: str, origin: str | None, language: str | None
+) -> str:
+    msg = f"Dish: {dish_name}"
+    if origin:
+        msg += f"\nOrigin: {origin}"
+    if language:
+        msg += f"\nMenu language: {language}"
+    return msg + "\nQuestions:\n" + "\n".join(f"- {t}" for t in texts)

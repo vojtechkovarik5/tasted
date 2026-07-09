@@ -62,6 +62,7 @@ async def _menu_out(menu: Menu, user: User | None, currencies: CurrencyService) 
         name=menu.name,
         status=_menu_status(menu),
         created_at=menu.created_at.isoformat(),
+        language=menu.language,
         items=items,
     )
 

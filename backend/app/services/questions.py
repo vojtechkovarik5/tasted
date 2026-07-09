@@ -7,6 +7,7 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import SessionDep
+from app.domain import TranslatedQuestions
 from app.models import UserQuestion
 from app.repositories import QuestionRepository
 from app.services.ai import QuestionAI, get_question_ai
@@ -87,6 +88,20 @@ class QuestionService:
         existing = [q.text for q in await self.questions.list_for_user(user_id)]
         suggestions = await self.ai.suggest_questions(chips, prefs.language, existing)
         return [c.key for c in chips], suggestions
+
+    async def translate(
+        self, texts: list[str], dish_name: str, origin: str | None, language: str | None
+    ) -> TranslatedQuestions:
+        """Translate questions for the ask-staff sheet (see QuestionAI).
+
+        `language` is the menu's stored language when the client knows it;
+        without one the AI infers it from the dish. Stateless — nothing is
+        persisted; the device caches translations per target language.
+        """
+        normalized = language.strip().lower()[:2] if language else None
+        return await self.ai.translate_questions(
+            texts, dish_name=dish_name, origin=origin, language=normalized or None
+        )
 
 
 def get_question_service(session: SessionDep) -> QuestionService:

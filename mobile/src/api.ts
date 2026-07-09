@@ -83,6 +83,10 @@ export type Menu = {
   name: string | null; // restaurant name
   status: "processing" | "complete";
   created_at: string; // ISO 8601
+  // ISO 639-1 the menu is printed in (read off the photo during extraction).
+  // The ask-staff sheet uses it as the translation target. Null for menus
+  // scanned before languages were recorded.
+  language: string | null;
   items: MenuItem[];
 };
 
@@ -260,6 +264,28 @@ export const reorderQuestions = (ids: string[]) =>
   request<Question[]>("/questions/order", json("PUT", { ids }));
 export const getQuestionSuggestions = () =>
   request<QuestionSuggestions>("/questions/suggestions");
+
+/** Ask-staff sheet: questions translated into the staff's language — the
+ *  menu's stored language when known (Menu.language), otherwise inferred by
+ *  the backend LLM from the dish (`language` is ISO 639-1). Stateless — the
+ *  device caches translations per target language. */
+export type TranslatedQuestions = { language: string; translations: string[] };
+
+export const translateQuestions = (
+  texts: string[],
+  dishName: string,
+  origin?: string | null,
+  language?: string | null,
+) =>
+  request<TranslatedQuestions>(
+    "/questions/translate",
+    json("POST", {
+      texts,
+      dish_name: dishName,
+      origin: origin ?? null,
+      language: language ?? null,
+    }),
+  );
 
 // Fixed id of the backend's canned demo menu (see backend routers/menus.py).
 export const DEMO_MENU_ID = "00000000-0000-0000-0000-00000000aaaa";

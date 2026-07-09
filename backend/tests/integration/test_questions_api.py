@@ -6,6 +6,7 @@ the "My questions" page behind Settings:
   * PUT    /questions/order       — persist a drag-reorder
   * DELETE /questions/{id}        — remove one
   * GET    /questions/suggestions — LLM suggestions from the watch list
+  * POST   /questions/translate   — translate for the ask-staff sheet
 
 Auth runs in fake mode (no CLERK_JWKS_URL): `Bearer alice` resolves to user
 "alice" — see app/auth.py. No OPENAI_API_KEY is set in tests, so suggestions
@@ -217,3 +218,83 @@ class TestSuggestions:
         resp = await client.get("/questions/suggestions", headers=ALICE)
 
         assert resp.json()["questions"] == ["Can this be made vegetarian?"]
+
+
+class TestTranslateQuestions:
+    """POST /questions/translate with the StubQuestionAI: honors an explicit
+    menu language, defaults to Portuguese (the stub's canned menu), and echoes
+    each text with a "[lang] " prefix."""
+
+    async def test_uses_the_menus_stored_language(self, client):
+        resp = await client.post(
+            "/questions/translate",
+            json={
+                "texts": ["Is this gluten-free?"],
+                "dish_name": "Smažený sýr",
+                "language": "cs",
+            },
+            headers=ALICE,
+        )
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "language": "cs",
+            "translations": ["[cs] Is this gluten-free?"],
+        }
+
+    async def test_language_is_normalized(self, client):
+        resp = await client.post(
+            "/questions/translate",
+            json={"texts": ["q"], "dish_name": "Francesinha", "language": "PT-pt"},
+            headers=ALICE,
+        )
+
+        assert resp.json()["language"] == "pt"
+
+    async def test_translates_preserving_order(self, client):
+        resp = await client.post(
+            "/questions/translate",
+            json={
+                "texts": ["Is this gluten-free?", "Is there meat in the broth?"],
+                "dish_name": "Francesinha",
+                "origin": "Porto, Portugal",
+            },
+            headers=ALICE,
+        )
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "language": "pt",
+            "translations": [
+                "[pt] Is this gluten-free?",
+                "[pt] Is there meat in the broth?",
+            ],
+        }
+
+    async def test_origin_is_optional(self, client):
+        resp = await client.post(
+            "/questions/translate",
+            json={"texts": ["Is this spicy?"], "dish_name": "Francesinha"},
+            headers=ALICE,
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["language"] == "pt"
+
+    async def test_rejects_empty_texts(self, client):
+        resp = await client.post(
+            "/questions/translate",
+            json={"texts": [], "dish_name": "Francesinha"},
+            headers=ALICE,
+        )
+
+        assert resp.status_code == 422
+
+    async def test_rejects_more_than_20_texts(self, client):
+        resp = await client.post(
+            "/questions/translate",
+            json={"texts": ["q"] * 21, "dish_name": "Francesinha"},
+            headers=ALICE,
+        )
+
+        assert resp.status_code == 422

@@ -1,6 +1,7 @@
 // Dish detail (design 1c): photo header, name + price, description,
 // regional-specialty banner, spice / price-level meters, "Watch out for"
-// rows with inline voting, and the "Ask staff" CTA.
+// rows with inline voting, and the "Ask staff" CTA (opens the ask-staff
+// bottom sheet, design 2a — see AskStaffSheet).
 //
 // Voting is optimistic: arrows nudge the local value slightly (a vote is one
 // voice, not a whole step) and fire the API call in the background — the
@@ -13,6 +14,7 @@ import { MenuItem, resolveUrl, sendVote } from "../api";
 import { Bar, CircleBtn, IconMeter, PrimaryButton } from "../components";
 import { isWatched, WATCHED_DIETARY } from "../prefs";
 import { radius, spacing, useTheme } from "../theme";
+import AskStaffSheet from "./AskStaffSheet";
 
 const VOTE_NUDGE = 0.25; // optimistic local shift per vote
 
@@ -45,7 +47,12 @@ function LevelRow(props: {
   );
 }
 
-export default function DishDetailScreen(props: { item: MenuItem; onBack: () => void }) {
+export default function DishDetailScreen(props: {
+  item: MenuItem;
+  menuLanguage?: string | null; // Menu.language, for the ask-staff sheet
+  onBack: () => void;
+  onOpenQuestions?: () => void;
+}) {
   const { colors } = useTheme();
   const { item } = props;
   const dish = item.dish!; // screen is only opened for ready items
@@ -55,6 +62,7 @@ export default function DishDetailScreen(props: { item: MenuItem; onBack: () => 
   // Optimistic local copies of the votable values.
   const [spice, setSpice] = useState(info.spice_level);
   const [price, setPrice] = useState(info.price_level ?? 0);
+  const [askOpen, setAskOpen] = useState(false);
 
   function voteLevel(target: "spice" | "price", dir: "up" | "down") {
     const delta = dir === "up" ? VOTE_NUDGE : -VOTE_NUDGE;
@@ -214,11 +222,17 @@ export default function DishDetailScreen(props: { item: MenuItem; onBack: () => 
 
       {/* ── Sticky CTA ── */}
       <View style={styles.cta}>
-        <PrimaryButton
-          title="🗣️ Ask staff about this dish"
-          onPress={() => Alert.alert("TODO", "phrasebook: polite question in local language")}
-        />
+        <PrimaryButton title="🗣️ Ask staff about this dish" onPress={() => setAskOpen(true)} />
       </View>
+
+      {askOpen ? (
+        <AskStaffSheet
+          item={item}
+          menuLanguage={props.menuLanguage}
+          onClose={() => setAskOpen(false)}
+          onEditQuestions={props.onOpenQuestions}
+        />
+      ) : null}
     </View>
   );
 }

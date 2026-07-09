@@ -41,6 +41,9 @@ export const lightColors = {
   // probability bars
   barTrack: "#E4DDCC",
   barNeutral: "#A99F8B",
+
+  // scrim behind bottom sheets / modals
+  overlay: "rgba(43, 35, 24, 0.45)",
 };
 
 export type Palette = typeof lightColors;
@@ -71,6 +74,8 @@ export const darkColors: Palette = {
 
   barTrack: "#3D352A",
   barNeutral: "#8B8171",
+
+  overlay: "rgba(0, 0, 0, 0.55)",
 };
 
 export const spacing = { xs: 4, s: 8, m: 12, l: 16, xl: 20, xxl: 28 } as const;

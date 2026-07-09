@@ -28,3 +28,7 @@ class MenuExtraction(BaseModel):
     """LLM structured-output target for a whole menu photo."""
 
     items: list[ExtractedMenuItem]
+    # ISO 639-1 of the language the menu is printed in — the vision pass reads
+    # it off the photo for free. Stored on the menu and reused wherever the
+    # staff's language matters (ask-staff question translations).
+    language: str | None = None

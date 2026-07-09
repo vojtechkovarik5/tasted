@@ -52,6 +52,9 @@ class MenuOut(BaseModel):
     name: str | None = None  # restaurant name (user-editable later)
     status: MenuStatus
     created_at: str  # ISO 8601
+    # ISO 639-1 the menu is printed in (read during extraction). The ask-staff
+    # sheet passes it to POST /questions/translate as the target language.
+    language: str | None = None
     items: list[MenuItemOut]
 
 

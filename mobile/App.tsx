@@ -66,7 +66,17 @@ function Root() {
   }
 
   if (openItem) {
-    return <DishDetailScreen item={openItem} onBack={() => setOpenItem(null)} />;
+    return (
+      <DishDetailScreen
+        item={openItem}
+        // Dishes are always opened from a menu; its language (read off the
+        // photo during extraction) is the ask-staff translation target.
+        menuLanguage={openMenu?.language}
+        onBack={() => setOpenItem(null)}
+        // "edit in Settings ›" on the ask-staff sheet jumps to My questions.
+        onOpenQuestions={() => setOpenQuestions(true)}
+      />
+    );
   }
 
   if (openMenu) {

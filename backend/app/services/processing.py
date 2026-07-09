@@ -28,7 +28,7 @@ from decimal import Decimal
 
 from app.config import settings
 from app.db import SessionLocal
-from app.models import Scan, ScanItem
+from app.models import Menu, Scan, ScanItem
 from app.repositories import ScanRepository
 from app.services.ai import MenuAI, get_menu_ai
 from app.services.dishes import DishService
@@ -106,6 +106,12 @@ class MenuProcessor:
             image = await self.storage.get(scan.image_path)
             media_type, _ = mimetypes.guess_type(scan.image_path)
             extraction = await self.ai.extract_menu(image, media_type)
+            # The vision pass reads the menu's printed language for free —
+            # keep it on the menu (first page wins) for ask-staff translations.
+            if extraction.language:
+                menu = await session.get(Menu, scan.menu_id)
+                if menu.language is None:
+                    menu.language = extraction.language
             items = [
                 ScanItem(
                     scan_id=scan.id,

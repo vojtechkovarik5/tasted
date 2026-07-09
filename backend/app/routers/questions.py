@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
 from app.auth import CurrentUserDep
+from app.domain import TranslatedQuestions
 from app.models import UserQuestion
 from app.services.questions import QuestionServiceDep
 
@@ -34,6 +35,19 @@ class SuggestionsOut(BaseModel):
 
     based_on: list[str]  # active watch keys the prompt was seeded with
     questions: list[str]  # in the user's language, ready to add
+
+
+class TranslateIn(BaseModel):
+    """The ask-staff sheet's payload: what to translate, about which dish."""
+
+    # Saved questions plus at most one just-typed — capped so a buggy client
+    # can't send an unbounded LLM prompt.
+    texts: list[str] = Field(min_length=1, max_length=20)
+    dish_name: str = Field(max_length=255)
+    origin: str | None = None  # DishInfo.origin, sharpens the fallback inference
+    # The menu's stored language (MenuOut.language) — used verbatim when set;
+    # null falls back to inferring from the dish (older scans have none).
+    language: str | None = Field(None, max_length=16)
 
 
 def _out(question: UserQuestion) -> QuestionOut:
@@ -68,6 +82,21 @@ async def reorder_questions(
         return [_out(q) for q in await questions.reorder(user_id, payload.ids)]
     except ValueError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from None
+
+
+@router.post("/translate", response_model=TranslatedQuestions)
+async def translate_questions(
+    payload: TranslateIn, user_id: CurrentUserDep, questions: QuestionServiceDep
+) -> TranslatedQuestions:
+    """Translate questions into the staff's language for the ask-staff sheet.
+
+    Targets the menu's stored language when the client sends it; menus
+    scanned before languages were recorded fall back to inferring it from
+    the dish. Stateless; auth only gates the LLM cost behind a signed-in
+    user."""
+    return await questions.translate(
+        payload.texts, payload.dish_name, payload.origin, payload.language
+    )
 
 
 @router.get("/suggestions", response_model=SuggestionsOut)

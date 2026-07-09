@@ -155,6 +155,17 @@ class TestProcessMenu:
         assert all(i["status"] == "ready" for i in items.values())
         assert all(i["dish_id"] is not None for i in items.values())
 
+    async def test_stores_menu_language_from_extraction(self, sessionmaker, processor):
+        # The vision pass reads the printed language off the photo; it lands
+        # on the menu (StubMenuAI's canned menu is Portuguese).
+        menu_id, _ = await _seed_scan(sessionmaker)
+
+        await processor.process_menu(menu_id)
+
+        async with sessionmaker() as s:
+            menu = await s.get(Menu, menu_id)
+            assert menu.language == "pt"
+
     async def test_persists_printed_price_and_currency(self, sessionmaker, processor):
         menu_id, scan_id = await _seed_scan(sessionmaker)
 
