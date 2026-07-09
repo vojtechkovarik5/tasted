@@ -1,4 +1,4 @@
-"""scans.updated_at for stuck-processing cleanup
+"""scans.updated_at + attempts for stuck cleanup and retry
 
 Revision ID: b3f2a9c4d1e7
 Revises: 193cb8eb7cf7
@@ -31,8 +31,15 @@ def upgrade() -> None:
             nullable=False,
         ),
     )
+    # Failed processing runs so far — caps how many times a page is retried
+    # before we give up on it.
+    op.add_column(
+        'scans',
+        sa.Column('attempts', sa.Integer(), server_default='0', nullable=False),
+    )
 
 
 def downgrade() -> None:
     """Downgrade schema."""
+    op.drop_column('scans', 'attempts')
     op.drop_column('scans', 'updated_at')

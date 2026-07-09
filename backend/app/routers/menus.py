@@ -15,7 +15,7 @@ from app.schemas import (
 )
 from app.services.currencies import CurrencyService, CurrencyServiceDep
 from app.services.menus import MenuService, MenuServiceDep, PhotoUpload
-from app.tasks import schedule_menu_processing
+from app.tasks import process_menu_task
 
 router = APIRouter(tags=["menus"])
 
@@ -88,8 +88,8 @@ async def create_menu(
     menu = await menus.create_with_photos(
         uploads, user_id=user.id if user else None, name=name
     )
-    schedule_menu_processing(menu.id)
-    return await _menu_out(menu, user, currencies)
+    process_menu_task.delay(str(menu.id))
+    return await _menu_out(menu, user, currencies) # TODO move currency fetch to service
 
 
 @router.get("/menus", response_model=list[MenuSummaryOut])

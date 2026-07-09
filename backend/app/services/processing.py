@@ -26,6 +26,7 @@ import mimetypes
 import uuid
 from decimal import Decimal
 
+from app.config import settings
 from app.db import SessionLocal
 from app.models import Scan, ScanItem
 from app.repositories import ScanRepository
@@ -41,59 +42,94 @@ class MenuProcessor:
         self.ai = ai or get_menu_ai()
         self.storage = storage or get_storage()
 
-    async def process_menu(self, menu_id: uuid.UUID) -> None:
+    async def process_menu(self, menu_id: uuid.UUID) -> bool:
         """Process every unprocessed page of a menu. Safe to re-run.
 
         Entry point for the Celery task that wraps us (app/tasks.py). Opens
         its own session — the request's session is long gone.
+
+        Returns True if a page failed transiently and was reverted to `new` for
+        retry, so the caller should reschedule the menu.
         """
+        should_retry = False
         async with SessionLocal() as session:
             scans = ScanRepository(session)
             dishes = DishService(session)
-            scan_ids = await scans.unprocessed_ids(menu_id)
+            scan_ids = await scans.claimable_ids(menu_id)
             if not scan_ids:
                 logger.warning("process_menu: nothing to process for menu %s", menu_id)
             for scan_id in scan_ids:
+                # Atomically claim the page (new -> processing) so a concurrent
+                # run of this task — a duplicate delivery, or a reschedule that
+                # overlaps a still-running worker — can't process it too.
+                if not await scans.claim(scan_id):
+                    logger.info("process_menu: scan %s already claimed, skipping", scan_id)
+                    continue
+                await session.commit()  # release the claim so others see it
                 # Fresh fetch per page — a rollback in a previous iteration
                 # leaves earlier-loaded objects expired.
                 scan = await scans.get(scan_id)
                 try:
                     await self._process_scan(session, scans, dishes, scan)
                 except Exception:
-                    # Fail the page, not the whole batch: mark what's still
-                    # unresolved and let the poll terminate. Statement UPDATEs
+                    # Don't sink the whole batch on one page. Statement UPDATEs
                     # (via repo) — session objects are unusable post-rollback.
                     logger.exception("processing scan %s failed", scan_id)
                     await session.rollback()
-                    await scans.fail_pending_items(scan_id)
-                    await scans.set_scan_status(scan_id, "complete")
+                    attempts = await scans.register_failure(scan_id)
+                    if attempts < settings.menu_processing_max_attempts:
+                        # Transient (e.g. AI hiccup) — revert to `new` so a
+                        # reschedule retries it; extraction is skipped if items
+                        # already landed, so the retry resumes, not restarts.
+                        await scans.set_scan_status(scan_id, "new")
+                        should_retry = True
+                    else:
+                        # Out of retries: mark unresolved items failed and let
+                        # the page settle so the poll can terminate.
+                        logger.error("giving up on scan %s after %d attempts", scan_id, attempts)
+                        await scans.fail_pending_items(scan_id)
+                        await scans.set_scan_status(scan_id, "complete")
                     await session.commit()
+        return should_retry
 
     async def _process_scan(
         self, session, scans: ScanRepository, dishes: DishService, scan: Scan
     ) -> None:
-        image = await self.storage.get(scan.image_path)
-        media_type, _ = mimetypes.guess_type(scan.image_path)
-
         # 1. extraction — one commit, so the next poll shows every item.
-        extraction = await self.ai.extract_menu(image, media_type)
-        items = [
-            ScanItem(
-                scan_id=scan.id,
-                position=i,
-                original_name=extracted.name,
-                menu_price=Decimal(str(extracted.price)) if extracted.price is not None else None,
-                menu_price_currency=extracted.currency,
-            )
-            for i, extracted in enumerate(extraction.items)
-        ]
-        scans.add_items(items)
-        await session.commit()
+        # Resumable: a rescheduled scan that already holds items (a prior run
+        # died mid-enrichment) skips extraction entirely, so we never re-fetch
+        # the image, re-run the vision call, or duplicate line items.
+        hints_by_name: dict[str, str | None] = {}
+        if scan.items:
+            items = list(scan.items)
+        else:
+            image = await self.storage.get(scan.image_path)
+            media_type, _ = mimetypes.guess_type(scan.image_path)
+            extraction = await self.ai.extract_menu(image, media_type)
+            items = [
+                ScanItem(
+                    scan_id=scan.id,
+                    position=i,
+                    original_name=extracted.name,
+                    menu_price=(
+                        Decimal(str(extracted.price)) if extracted.price is not None else None
+                    ),
+                    menu_price_currency=extracted.currency,
+                )
+                for i, extracted in enumerate(extraction.items)
+            ]
+            hints_by_name = {e.name: e.allergen_hints for e in extraction.items}
+            scans.add_items(items)
+            await session.commit()
+
+        # Only items not already resolved — on a resume the already-ready ones
+        # (linked to a dish in a prior run) are skipped; pending/failed retry.
+        todo = [item for item in items if item.status != "ready"]
 
         # 2. cache pass — hits flip to ready in one commit.
-        embeddings = await self.ai.embed([item.original_name for item in items])
+        embeddings = await self.ai.embed([item.original_name for item in todo])
         misses: list[tuple[ScanItem, list[float]]] = []
-        for item, embedding in zip(items, embeddings, strict=True):
+        for item, embedding in zip(todo, embeddings, strict=True):
             dish = await dishes.find_similar(embedding)
             if dish is not None:
                 item.dish_id = dish.id
@@ -104,7 +140,6 @@ class MenuProcessor:
 
         # 3. enrichment pass — misses become dishes, committed per item so each
         # poll picks up whatever finished since the last one.
-        hints_by_name = {e.name: e.allergen_hints for e in extraction.items}
         for item, embedding in misses:
             try:
                 info = await self.ai.enrich_dish(

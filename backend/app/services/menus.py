@@ -43,13 +43,15 @@ class MenuService:
         """Store the uploaded pages and return the menu immediately.
 
         Fast path behind the upload request: push each page to object storage,
-        create menu + one processing `Scan` per page (storage key kept in
-        `image_path`), and return — mainly so the client has the menu id to
+        create menu + one `Scan` per page in the `new` state (storage key kept
+        in `image_path`), and return — mainly so the client has the menu id to
         poll. No AI here; the caller enqueues the pipeline afterwards via
-        tasks.schedule_menu_processing(menu.id).
+        process_menu_task.delay(menu.id), and the worker claims each new scan
+        (new -> processing -> complete).
         """
         menu = Menu(id=uuid.uuid4(), user_id=user_id, name=name)
 
+        # TODO gather
         for photo in photos:
             scan_id = uuid.uuid4()
             ext = extension_for(photo.content_type)

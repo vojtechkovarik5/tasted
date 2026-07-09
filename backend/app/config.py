@@ -23,6 +23,16 @@ class Settings(BaseSettings):
     # S3 key prefix (so envs don't collide in a shared bucket).
     app_env: str = "local"
 
+    # A scan stuck in `processing` longer than this is assumed dead (worker
+    # crashed mid-page); the cleanup beat task resets it to `new` and reschedules
+    # its menu. Comfortably above the longest a real page takes to process.
+    menu_processing_stale_after_seconds: int = 600
+    # A page that raises during processing (e.g. a transient AI error) reverts to
+    # `new` and is retried after this delay, up to this many total attempts; then
+    # we give up so an unreadable photo doesn't re-queue indefinitely.
+    menu_processing_max_attempts: int = 3
+    menu_processing_retry_delay_seconds: int = 30
+
     # --- Clerk (auth) ------------------------------------------------------
     # JWKS_URL verifies session JWTs; secret key is for the Clerk admin SDK.
     # When unset (local dev) auth falls back to a fixed dev user — see auth.py.

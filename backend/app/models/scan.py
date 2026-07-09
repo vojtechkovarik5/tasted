@@ -59,7 +59,11 @@ class Scan(Base):
     menu_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("menus.id", ondelete="CASCADE"), index=True
     )
-    status: Mapped[str] = mapped_column(String(16), default="processing")  # processing | complete
+    # new        -> uploaded, waiting for a worker to pick it up
+    # processing -> a worker has claimed it (new -> processing is atomic, so two
+    #               workers never process the same scan)
+    # complete   -> done (or failed page); never re-processed
+    status: Mapped[str] = mapped_column(String(16), default="new")  # new | processing | complete
     # Where the uploaded photo is stored (settings.upload_dir), for the
     # background processor and future reprocessing.
     image_path: Mapped[str] = mapped_column(Text)
@@ -67,6 +71,15 @@ class Scan(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+    # Bumped on every status change; for `processing` scans this marks when the
+    # claim happened, so the cleanup task can find pages stuck mid-processing.
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    # Failed processing runs so far. A transient failure reverts the scan to
+    # `new` and reschedules it; past settings.menu_processing_max_attempts we
+    # give up (mark complete) so a permanently-bad photo can't loop forever.
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
     menu: Mapped[Menu] = relationship(back_populates="scans")
     items: Mapped[list[ScanItem]] = relationship(

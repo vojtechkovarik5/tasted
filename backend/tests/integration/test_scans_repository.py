@@ -118,3 +118,15 @@ class TestResetStuck:
             await _age(db_session, scan, timedelta(minutes=30))
 
         assert await repo.reset_stuck(timedelta(minutes=10)) == [menu.id]
+
+
+class TestRegisterFailure:
+    async def test_increments_and_returns_count(self, repo, db_session):
+        menu = await _make_menu(db_session)
+        scan = await _make_scan(db_session, menu, "processing")
+
+        assert await repo.register_failure(scan.id) == 1
+        assert await repo.register_failure(scan.id) == 2
+
+        attempts = await db_session.scalar(select(Scan.attempts).where(Scan.id == scan.id))
+        assert attempts == 2

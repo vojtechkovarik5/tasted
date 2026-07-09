@@ -17,12 +17,13 @@ def process_menu_task(menu_id: str) -> None:
     """Run the scan pipeline for one menu (see services/processing.py)."""
     # Imported here so the celery CLI can load app.tasks without pulling the
     # whole app graph at module import.
+    from app.config import settings
     from app.db import engine
     from app.services.processing import MenuProcessor
 
-    async def run() -> None:
+    async def run() -> bool:
         try:
-            await MenuProcessor().process_menu(uuid.UUID(menu_id))
+            return await MenuProcessor().process_menu(uuid.UUID(menu_id))
         finally:
             # Each task runs in its own event loop (asyncio.run) but the
             # engine's pool outlives it, and asyncpg connections are bound to
@@ -30,13 +31,44 @@ def process_menu_task(menu_id: str) -> None:
             # worker process starts with a fresh pool on its own loop.
             await engine.dispose()
 
+    if asyncio.run(run()):
+        # A page failed transiently and was reverted to `new`; retry the menu
+        # after a short delay so the reverted page gets picked up again.
+        process_menu_task.apply_async(
+            (menu_id,), countdown=settings.menu_processing_retry_delay_seconds
+        )
+
+
+@celery_app.task(name="reschedule_stuck_menus")
+def reschedule_stuck_menus_task() -> None:
+    """Recover menus stuck mid-processing.
+
+    A page claimed by a worker that then died stays `processing` forever — no
+    other run will touch it (only `new` scans are claimable). This beat task
+    (see celery_app) resets scans that have sat in `processing` past
+    settings.menu_processing_stale_after_seconds back to `new` and re-enqueues
+    their menus, so the reset pages get picked up and reprocessed.
+    """
+    from datetime import timedelta
+
+    from app.config import settings
+    from app.db import SessionLocal, engine
+    from app.repositories.scans import ScanRepository
+
+    async def run() -> None:
+        try:
+            stale_after = timedelta(seconds=settings.menu_processing_stale_after_seconds)
+            async with SessionLocal() as session:
+                menu_ids = await ScanRepository(session).reset_stuck(stale_after)
+                await session.commit()
+            for menu_id in menu_ids:
+                process_menu_task.delay(str(menu_id))
+            if menu_ids:
+                logger.warning("rescheduled %d stuck menu(s): %s", len(menu_ids), menu_ids)
+        finally:
+            await engine.dispose()  # loop-bound asyncpg pool, see process_menu_task
+
     asyncio.run(run())
-
-
-def schedule_menu_processing(menu_id: uuid.UUID) -> None:
-    """Enqueue processing of a menu — what the upload endpoint calls after
-    MenuService.create_with_photos has committed."""
-    process_menu_task.delay(str(menu_id))
 
 
 @celery_app.task(name="refresh_currency_rates", autoretry_for=(Exception,), retry_backoff=60,
