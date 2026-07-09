@@ -1,0 +1,19 @@
+# Python / backend
+backend/uploads/
+.venv/
+__pycache__/
+*.pyc
+.env
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Node / mobile
+node_modules/
+.expo/
+dist/
+*.log
+
+# Editors
+.idea/
+.vscode/

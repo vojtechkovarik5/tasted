@@ -1,0 +1,39 @@
+[project]
+name = "tasted"
+version = "0.1.0"
+description = "Tasted API — photograph a foreign menu, get dish info, allergens and dietary flags."
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg>=0.30",
+    "pgvector>=0.3",
+    "pydantic-settings>=2.6",
+    "python-multipart>=0.0.12",
+    "alembic>=1.18.5",
+    "celery[redis]>=5.6.3",
+    "httpx>=0.28.1",
+    "fastapi-clerk-auth>=0.0.7",
+    "clerk-backend-api>=3.1.11",
+    "pyjwt>=2.10.1",
+    "aioboto3>=13",
+    "langchain-openai>=0.3",
+    "openai>=1.55",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.7",
+]
+
+# This is an application, not a distributable package — don't try to build/install it.
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
