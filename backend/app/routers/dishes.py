@@ -3,9 +3,12 @@ import uuid
 from fastapi import APIRouter, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
-from app.auth import CurrentUserDep
+from app.auth import CurrentUserDep, OptionalUserDep
+from app.domain import Language, Preferences
 from app.schemas import DishOut, MyVotesOut, VoteAck, VoteDirection, VoteTarget
+from app.schemas.dish import attribute_label_pairs
 from app.services.dishes import DishServiceDep
+from app.services.trackables import TrackableServiceDep
 
 router = APIRouter(prefix="/dishes", tags=["dishes"])
 
@@ -24,12 +27,36 @@ class PhotoAck(BaseModel):
 
 
 @router.get("/{dish_id}", response_model=DishOut)
-async def get_dish(dish_id: uuid.UUID, service: DishServiceDep) -> DishOut:
-    """Dish detail (canonical cached dish, moderated photos included)."""
+async def get_dish(
+    dish_id: uuid.UUID,
+    user: OptionalUserDep,
+    service: DishServiceDep,
+    trackables: TrackableServiceDep,
+    lang: str | None = None,
+) -> DishOut:
+    """Canonical dish-family detail (moderated photos, variants included).
+
+    Prose comes from the stored per-language translations and every
+    allergen/dietary/ingredient label from the catalog, resolved to ?lang=
+    (a signed-out device's local preference), else the user's stored
+    language, falling back to English."""
     dish = await service.get(dish_id)
     if dish is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Dish not found")
-    return DishOut.from_orm_dish(dish)
+    language = _language(user, lang)
+    labels = await trackables.labels(attribute_label_pairs(dish), language)
+    return DishOut.from_orm_dish(dish, language=language, labels=labels)
+
+
+def _language(user, lang: str | None) -> Language:
+    if lang:
+        try:
+            return Language(lang.lower())
+        except ValueError:
+            pass
+    if user is not None:
+        return Preferences.model_validate(user.prefs or {}).language
+    return Language.en
 
 
 @router.post("/{dish_id}/vote/{target}", response_model=VoteAck)

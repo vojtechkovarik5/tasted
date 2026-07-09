@@ -4,12 +4,12 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String, Text, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, SmallInteger, String, Text, func
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
-from app.models.dish import Dish
+from app.models.dish import Dish, DishVariant
 
 
 class Menu(Base):
@@ -132,10 +132,27 @@ class ScanItem(Base):
     menu_price_currency: Mapped[str | None] = mapped_column(String(3))  # ISO 4217
     # "born in Porto, you're in the right city"
     regional_note: Mapped[str | None] = mapped_column(Text)
+    # Ingredients printed on the menu for this item ("Contains: ..."), a JSON
+    # list of {"key", "name", "translated_name"} — key is the canonical
+    # trackables slug (nullable), names are menu/user language. Faithful to
+    # the menu, NOT canonical dish data.
+    menu_ingredients: Mapped[list | None] = mapped_column(JSONB)
+    # Allergens explicitly marked on the menu, canonical EU-14 slugs.
+    menu_allergens: Mapped[list | None] = mapped_column(JSONB)
+    # A menu item MAY match a canonical dish family — it's not necessary.
     # SET NULL: deleting a canonical dish must not tear scan history apart.
     dish_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("dishes.id", ondelete="SET NULL"), index=True
     )
+    # How confident the match is, 0-100 ("Pad Thai · 91%"). Null when no
+    # dish matched — the card shows "dish stays as written".
+    match_confidence: Mapped[int | None] = mapped_column(SmallInteger)
+    # The family variant this item matched ("Gai · chicken"), highlighted on
+    # the dish page; null when the item is the generic family dish.
+    dish_variant_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("dish_variants.id", ondelete="SET NULL"), index=True
+    )
 
     scan: Mapped[Scan] = relationship(back_populates="items")
     dish: Mapped[Dish | None] = relationship(lazy="selectin")
+    dish_variant: Mapped[DishVariant | None] = relationship(lazy="selectin")

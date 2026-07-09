@@ -37,8 +37,16 @@ language; null when there is no description or it's already in the user's \
 language.
 - `price`: the numeric price if shown, else null. `currency`: ISO 4217 \
 inferred from the symbol/context (€->EUR, Kč->CZK, £->GBP), else null.
+- `ingredients`: the ingredients printed for the item (its description or a \
+"contains" line), one entry each, in print order. `name` as printed (menu's \
+own language), `translated_name` in the user's language (null when identical), \
+`key` a canonical English slug — lowercase, hyphenated, singular concept \
+("rýžové nudle" -> "rice-noodles", "kuře" -> "chicken"); null when there is \
+no sensible canonical form. Do NOT invent ingredients the menu doesn't print.
 - `allergen_hints`: only allergens explicitly marked on the menu (icons, \
-footnote letters/numbers, "contains ..."). Do not guess from the dish name.
+footnote letters/numbers, "contains ..."), as canonical EU-14 slugs: gluten, \
+crustaceans, egg, fish, peanuts, soy, milk, nuts, celery, mustard, sesame, \
+sulphites, lupin, molluscs. Do not guess from the dish name.
 - `language`: the ISO 639-1 code of the menu's own language ("pt" for a \
 Portuguese menu). For a multilingual menu, the primary/local language. Null \
 only if genuinely unreadable.
@@ -55,37 +63,79 @@ def extract_user(language_name: str) -> str:
     )
 
 ENRICH_SYSTEM = """You are a food expert helping travelers understand foreign \
-dishes. Given a dish name (and sometimes the description a menu printed for \
-it), return concise, accurate information. This is CANONICAL knowledge about \
-the dish shown to every user, so write it in English and describe the \
-typical/authentic dish, not one restaurant's take.
+dishes. Given one menu item (name, and sometimes the description a menu \
+printed for it), decide whether it corresponds to a canonical dish FAMILY \
+and, if so, return concise, accurate knowledge about that family. This is \
+CANONICAL knowledge shown to every user — describe the typical dish \
+worldwide, never one restaurant's take.
 
-- `original_name`: echo the given name.
-- `translated_name`: an English translation ONLY when the name is descriptive \
-and translating it helps ("Pato com batatas" -> "Duck with potatoes"). \
-Proper dish names travelers know as-is (Francesinha, Phở, Tiramisu) -> null. \
-Null when the name is already English. `aliases`: other common names.
-- `summary`: one enticing sentence for a list card. `description`: 2-3 \
-sentences on what it is, key ingredients, and how it's served.
-- `origin`: region/country of origin if notable, else null.
-- `allergens`/`dietary`: each a probability 0-1 that the dish contains the \
-allergen / satisfies the diet. Cover the common allergens plausibly present \
-(gluten, milk, egg, fish, shellfish, nuts, soy, pork) and diets the traveler \
-tracks (vegetarian, vegan). A low `vegetarian` probability means it almost \
-certainly contains meat.
-- `macros`: estimated for one typical serving — kcal, protein_g, fat_g, \
-carbs_g. Rough good-faith estimates are fine; null only when truly unknowable.
+THE FAMILY RULE — one canonical page per dish family:
+- Thousands of menu variants collapse into ONE family with facets: "Pad Thai \
+Gai", "Pad Thai Goong" -> family "Pad Thai", variants gai/goong/jay \
+(noodle x protein facets). Combos (lomo saltado, loaded fries) are ONE \
+family too — never split them into their components.
+- `matched`: true only when the item genuinely maps to a recognizable \
+family. A house special, a generic descriptive line ("chef's daily soup") \
+or an unrecognizable name -> matched=false, everything else ignored; the \
+menu item then stays as written, with no dish page.
+- `confidence`: 0-1, how sure you are of the family match.
+- `variant_key`: which of `info.variants` the ITEM matched ("gai" for "Pad \
+Thai Gai"); null when the item is the generic family dish.
+
+When matched, fill `info` about the FAMILY:
+- `original_name`: the family's canonical name ("Pad Thai", not "Pad Thai \
+Gai"). `native_name`: the name in its original script when different \
+("ผัดไทย"). `pronunciation`: IPA ("pʰàt tʰāj"). `aliases`: other common \
+spellings/names. `translated_name`: an English translation ONLY when the \
+name is descriptive and translating helps; proper dish names -> null.
+- `summary`: one enticing sentence. `description`: 2-3 sentences on what it \
+is, its story, key ingredients, how it's served.
+- `origin`: country/region ("Thailand"). `category`: a short typology line \
+("stir-fried rice-noodle dish"). `national_dish`: true when it's promoted \
+as a national dish.
+- `ingredients`: the ingredients commonly present across versions, each with \
+probability 0-1 (share of versions containing it). Use canonical English \
+slugs as `name` (lowercase, hyphenated: "rice-noodles", "fish-sauce").
+- `allergens`: probability 0-1 the typical dish contains each plausibly \
+present allergen — canonical EU-14 slugs only: gluten, crustaceans, egg, \
+fish, peanuts, soy, milk, nuts, celery, mustard, sesame, sulphites, lupin, \
+molluscs.
+- `dietary`: DIET FIT — the share of versions worldwide fitting each flag, \
+0-1, using slugs: vegetarian, vegan, meat, fish-seafood, raw, fried (and \
+halal/kosher when meaningful). E.g. fish sauce makes most "vegetarian" pad \
+thai versions not strict -> vegetarian ~0.35.
+- `macros`: whole-dish AVERAGE PER 100 g across variants — kcal, protein_g, \
+fat_g, carbs_g. Good-faith estimates; null only when truly unknowable.
 - `spice_level`: 0-5. `price_level`: 1-5 relative to typical restaurant fare.
-Base estimates on the dish's typical/authentic preparation; the menu's \
-printed description (when given) tells you this restaurant's ingredients."""
+- `variants`: the common variants of the family as facets (key: slug like \
+"gai"; name: "Gai · chicken"; short description optional). Include the one \
+the item matched.
+- `similar`: 2-4 names of related families ("Pad See Ew", "Char Kway Teow").
+- `translations`: one entry per language listed in the user message — \
+`language` (its ISO 639-1 code) plus `summary` and `description` written in \
+it. English stays in the base fields. Skip a language only if you cannot \
+write it well — readers fall back to English.
+- `ingredient_entries` (next to info): one entry per info.ingredients row — \
+`key` (same slug), `name` (natural English display name: "rice noodles"), \
+`probability` (same value) and `translations`: {language, name} for every \
+listed language.
+Base estimates on the family's typical preparation; the menu's printed \
+description (when given) is context for the match, not the family."""
 
 
-def enrich_user(name: str, hints: list[str] | None, menu_description: str | None = None) -> str:
-    msg = f"Dish name: {name}"
+def enrich_user(
+    name: str,
+    hints: list[str] | None,
+    menu_description: str | None = None,
+    language_names: list[str] | None = None,
+) -> str:
+    msg = f"Menu item name: {name}"
     if menu_description:
         msg += f"\nDescription printed on the menu: {menu_description}"
     if hints:
         msg += f"\nAllergens marked on the menu: {', '.join(hints)}"
+    if language_names:
+        msg += f"\nTranslation languages: {', '.join(language_names)}"
     return msg
 
 

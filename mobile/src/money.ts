@@ -36,6 +36,13 @@ const SYMBOL_AFTER: Record<string, string> = {
 
 const NO_DECIMALS = new Set(["JPY", "KRW", "VND", "IDR", "HUF"]);
 
+/** The bare currency symbol ("฿", "Kč") — used by the price-level meter so
+ *  it counts in the menu's own money ("฿฿฿"). ISO code fallback. */
+export function currencySymbol(currency: string | null | undefined): string {
+  if (!currency) return "€";
+  return SYMBOL_BEFORE[currency] ?? SYMBOL_AFTER[currency] ?? currency;
+}
+
 export function fmtMoney(money: Money): string {
   const { amount, currency } = money;
   const wholes = NO_DECIMALS.has(currency) || Number.isInteger(amount);

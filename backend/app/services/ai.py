@@ -26,12 +26,19 @@ from app.domain import (
     LANGUAGE_NAMES,
     Allergen,
     DietaryFlag,
+    DishEnrichment,
     DishInfo,
+    DishTranslation,
+    DishVariantInfo,
     ExtractedGroup,
+    ExtractedIngredient,
     ExtractedMenuItem,
+    Ingredient,
+    IngredientEntry,
     Language,
     Macros,
     MenuExtraction,
+    NameTranslation,
     SuggestedQuestions,
     TranslatedQuestions,
     WatchChip,
@@ -65,10 +72,14 @@ class MenuAI(Protocol):
         *,
         hints: list[str] | None = None,
         menu_description: str | None = None,
-    ) -> DishInfo:
-        """Full canonical dish knowledge for one item that missed the cache.
-        `menu_description` is the description printed on the menu, extra
-        context only — the result describes the typical dish."""
+    ) -> DishEnrichment:
+        """Canonical dish-FAMILY knowledge for one item that missed the cache.
+
+        The model decides whether the item maps to a family at all
+        (`matched`), with what `confidence`, and which `variant_key` the item
+        hit. `menu_description` is the description printed on the menu, extra
+        context only — the result describes the typical family, translated
+        into every supported language (English in the base fields)."""
         ...
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
@@ -95,6 +106,15 @@ class StubMenuAI:
                     group="Pratos",
                     price=9.50,
                     currency="EUR",
+                    ingredients=[
+                        ExtractedIngredient(
+                            name="pão", translated_name="bread", key="bread"
+                        ),
+                        ExtractedIngredient(name="linguiça", key="linguica"),
+                        ExtractedIngredient(
+                            name="fiambre", translated_name="ham", key="ham"
+                        ),
+                    ],
                 ),
                 ExtractedMenuItem(
                     name="Bacalhau à Brás",
@@ -115,16 +135,48 @@ class StubMenuAI:
         *,
         hints: list[str] | None = None,
         menu_description: str | None = None,
-    ) -> DishInfo:
-        return DishInfo(
+    ) -> DishEnrichment:
+        info = DishInfo(
             original_name=name,
+            pronunciation="stʌb",
             summary=f"{name} — stub enrichment.",
             description=f"Stub description for {name}. Replace StubMenuAI with a real adapter.",
+            category="stub dish",
             allergens=[Allergen(name=h, probability=0.9) for h in (hints or [])],
-            dietary=[DietaryFlag(name="vegetarian", probability=0.5)],
-            macros=Macros(kcal=650, protein_g=30, fat_g=35, carbs_g=50),
+            dietary=[
+                DietaryFlag(name="vegetarian", probability=0.5),
+                DietaryFlag(name="fried", probability=0.8),
+            ],
+            ingredients=[Ingredient(name="bread", probability=0.95)],
+            macros=Macros(kcal=250, protein_g=12, fat_g=14, carbs_g=20),
             spice_level=1.0,
             price_level=2.0,
+            variants=[
+                DishVariantInfo(key="classic", name="Classic"),
+                DishVariantInfo(key="veggie", name="Veggie"),
+            ],
+            similar=["Stub Salad"],
+            translations=[
+                DishTranslation(
+                    language="cs",
+                    summary=f"{name} — stub (cs).",
+                    description=f"Stub popis pro {name}.",
+                )
+            ],
+        )
+        return DishEnrichment(
+            matched=True,
+            confidence=0.9,
+            variant_key=None,
+            info=info,
+            ingredient_entries=[
+                IngredientEntry(
+                    key="bread",
+                    name="bread",
+                    probability=0.95,
+                    translations=[NameTranslation(language="cs", name="chléb")],
+                )
+            ],
         )
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
@@ -175,15 +227,27 @@ class OpenAIMenuAI:
         *,
         hints: list[str] | None = None,
         menu_description: str | None = None,
-    ) -> DishInfo:
+    ) -> DishEnrichment:
+        # Translations target every supported language except English, which
+        # stays in the base fields (and is the read-time fallback).
+        language_names = [
+            LANGUAGE_NAMES[lang] for lang in Language if lang is not Language.en
+        ]
         messages = [
             SystemMessage(content=ENRICH_SYSTEM),
-            HumanMessage(content=enrich_user(name, hints, menu_description)),
+            HumanMessage(
+                content=enrich_user(
+                    name, hints, menu_description, language_names=language_names
+                )
+            ),
         ]
-        llm = get_chat_client(settings.openai_enrich_model).with_structured_output(DishInfo)
-        info = await llm.ainvoke(messages)
-        info.original_name = name  # never let the model rename the item
-        return info
+        llm = get_chat_client(settings.openai_enrich_model).with_structured_output(
+            DishEnrichment
+        )
+        enrichment = await llm.ainvoke(messages)
+        if enrichment.matched and enrichment.info is None:
+            enrichment.matched = False  # a chatty model can't half-match
+        return enrichment
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         return await get_embeddings_client().aembed_documents(texts)

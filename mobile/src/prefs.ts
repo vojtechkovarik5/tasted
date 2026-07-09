@@ -53,5 +53,8 @@ export const watchedAllergens = (p: Preferences) =>
 export const watchedDietary = (p: Preferences) =>
   new Set(p.watch_list.filter((c) => c.on && c.kind === "dietary").map((c) => c.key));
 
+export const watchedIngredients = (p: Preferences) =>
+  new Set(p.watch_list.filter((c) => c.on && c.kind === "ingredient").map((c) => c.key));
+
 export const isWatched = (name: string, p: Preferences) =>
   p.watch_list.some((c) => c.on && c.key === name);

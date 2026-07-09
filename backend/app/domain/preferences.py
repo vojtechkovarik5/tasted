@@ -49,17 +49,22 @@ LANGUAGE_NAMES: dict[Language, str] = {
 
 
 class WatchChip(BaseModel):
-    """One chip in the "Watch out for" list. Order in the list matters."""
+    """One chip in the "What I track" list. Order in the list matters.
 
-    key: str  # "gluten", "vegetarian", "pork", ...
-    kind: str  # "allergen" | "dietary"
+    Keys reference the trackables catalog: allergens are the fixed EU-14,
+    dietary and ingredient keys can also be user-suggested (pending) entries.
+    """
+
+    key: str  # "gluten", "vegetarian", "coriander", ...
+    kind: str  # "allergen" | "dietary" | "ingredient"
     on: bool = True
 
 
 class Preferences(BaseModel):
     """User preferences (Profile screen). Works locally without an account."""
 
-    # One ordered list — allergens, diets, whole categories or exact meats.
+    # One ordered list — allergens, diets and tracked ingredients. Picked
+    # things show as tags on every menu item and dish.
     watch_list: list[WatchChip] = [
         WatchChip(key="gluten", kind="allergen"),
         WatchChip(key="vegetarian", kind="dietary"),

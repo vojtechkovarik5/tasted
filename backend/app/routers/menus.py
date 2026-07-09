@@ -3,7 +3,7 @@ import uuid
 from fastapi import APIRouter, Form, HTTPException, UploadFile, status
 
 from app.auth import OptionalUserDep
-from app.domain import Money, Preferences
+from app.domain import Language, Money, Preferences
 from app.models import Menu, ScanItem, User
 from app.schemas import (
     DishOut,
@@ -12,19 +12,27 @@ from app.schemas import (
     MenuOut,
     MenuStatus,
     MenuSummaryOut,
+    MenuTagOut,
 )
+from app.schemas.dish import Labels, attribute_label_pairs
 from app.services.currencies import CurrencyService, CurrencyServiceDep
 from app.services.menus import MenuService, MenuServiceDep, PhotoUpload
+from app.services.trackables import TrackableService, TrackableServiceDep
 from app.tasks import process_menu_task
 
 router = APIRouter(tags=["menus"])
 
 
 async def _item_out(
-    item: ScanItem, target_currency: str, currencies: CurrencyService
+    item: ScanItem,
+    target_currency: str,
+    currencies: CurrencyService,
+    language: Language,
+    labels: Labels,
 ) -> MenuItemOut:
     """Map a ScanItem to the API shape, converting the printed price to the
-    user's currency (rates change daily, so this is computed at read time)."""
+    user's currency (rates change daily, so this is computed at read time)
+    and localizing catalog labels to the user's language."""
     menu_price = approx_price = None
     if item.menu_price is not None and item.menu_price_currency:
         menu_price = Money(amount=float(item.menu_price), currency=item.menu_price_currency)
@@ -37,6 +45,18 @@ async def _item_out(
                 approx_price = Money(
                     amount=round(float(converted), 2), currency=target_currency
                 )
+    # Printed ingredients keep the menu's wording (translated during
+    # extraction); printed allergens are canonical slugs resolved through the
+    # catalog like every other tag.
+    menu_ingredients = [
+        MenuTagOut(key=ing.get("key"), name=ing.get("translated_name") or ing.get("name"))
+        for ing in (item.menu_ingredients or [])
+        if ing.get("name")
+    ]
+    menu_allergens = [
+        MenuTagOut(key=key, name=labels.get(("allergen", key), key.replace("-", " ")))
+        for key in (item.menu_allergens or [])
+    ]
     return MenuItemOut(
         id=item.id,
         original_name=item.original_name,
@@ -50,7 +70,15 @@ async def _item_out(
         menu_price=menu_price,
         approx_price=approx_price,
         regional_note=item.regional_note,
-        dish=DishOut.from_orm_dish(item.dish) if item.dish is not None else None,
+        menu_ingredients=menu_ingredients,
+        menu_allergens=menu_allergens,
+        dish=(
+            DishOut.from_orm_dish(item.dish, language=language, labels=labels)
+            if item.dish is not None
+            else None
+        ),
+        match_confidence=item.match_confidence,
+        matched_variant_key=item.dish_variant.key if item.dish_variant else None,
     )
 
 
@@ -59,13 +87,24 @@ def _menu_status(menu: Menu) -> MenuStatus:
     return MenuStatus.complete if done else MenuStatus.processing
 
 
-async def _menu_out(menu: Menu, user: User | None, currencies: CurrencyService) -> MenuOut:
+async def _menu_out(
+    menu: Menu, user: User | None, currencies: CurrencyService, trackables: TrackableService
+) -> MenuOut:
     # Anonymous scans convert into the default currency; the device applies
     # its local preference on top if it differs.
     prefs = Preferences.model_validate(user.prefs or {}) if user else Preferences()
     currency = prefs.currency
+    combined = MenuService.combined_items(menu)
+    # One catalog query localizes every tag on the menu: printed allergens
+    # plus each matched dish's attribute labels.
+    pairs: set[tuple[str, str]] = set()
+    for item in combined:
+        pairs.update(("allergen", key) for key in (item.menu_allergens or []))
+        if item.dish is not None:
+            pairs.update(attribute_label_pairs(item.dish))
+    labels = await trackables.labels(pairs, prefs.language)
     items = [
-        await _item_out(i, currency, currencies) for i in MenuService.combined_items(menu)
+        await _item_out(i, currency, currencies, prefs.language, labels) for i in combined
     ]
     return MenuOut(
         id=menu.id,
@@ -83,6 +122,7 @@ async def create_menu(
     user: OptionalUserDep,
     menus: MenuServiceDep,
     currencies: CurrencyServiceDep,
+    trackables: TrackableServiceDep,
     name: str | None = Form(None),  # optional restaurant title from the app
 ) -> MenuOut:
     """Create a menu from one or more photos (pages of the same menu).
@@ -100,7 +140,8 @@ async def create_menu(
         uploads, user_id=user.id if user else None, name=name
     )
     process_menu_task.delay(str(menu.id))
-    return await _menu_out(menu, user, currencies) # TODO move currency fetch to service
+    # TODO move currency fetch to service
+    return await _menu_out(menu, user, currencies, trackables)
 
 
 @router.get("/menus", response_model=list[MenuSummaryOut])
@@ -130,6 +171,7 @@ async def get_menu(
     user: OptionalUserDep,
     menus: MenuServiceDep,
     currencies: CurrencyServiceDep,
+    trackables: TrackableServiceDep,
 ) -> MenuOut:
     """Poll a menu's resolution progress. Items flip pending -> ready as the
     background pipeline enriches them.
@@ -144,4 +186,4 @@ async def get_menu(
     )
     if menu is None or owned_by_someone_else:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Menu not found")
-    return await _menu_out(menu, user, currencies)
+    return await _menu_out(menu, user, currencies, trackables)

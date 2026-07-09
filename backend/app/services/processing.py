@@ -29,11 +29,13 @@ from decimal import Decimal
 from app.config import settings
 from app.db import SessionLocal
 from app.domain import ExtractedMenuItem, Language, Preferences
+from app.domain.catalog import slugify
 from app.models import Menu, Scan, ScanItem, User
 from app.repositories import ScanRepository
 from app.services.ai import MenuAI, get_menu_ai
-from app.services.dishes import DishService
+from app.services.dishes import DishService, match_variant
 from app.services.storage import Storage, get_storage
+from app.services.trackables import TrackableService
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +153,13 @@ class MenuProcessor:
                         Decimal(str(extracted.price)) if extracted.price is not None else None
                     ),
                     menu_price_currency=extracted.currency,
+                    # Faithful to the menu: what it prints as contents and
+                    # marked allergens, kept per item for the listing card.
+                    menu_ingredients=[
+                        ing.model_dump() for ing in extracted.ingredients
+                    ]
+                    or None,
+                    menu_allergens=[slugify(a) for a in extracted.allergen_hints] or None,
                 )
                 for i, extracted in enumerate(extraction.items)
             ]
@@ -162,32 +171,68 @@ class MenuProcessor:
         # (linked to a dish in a prior run) are skipped; pending/failed retry.
         todo = [item for item in items if item.status != "ready"]
 
-        # 2. cache pass — hits flip to ready in one commit.
+        # 2. cache pass — hits link their family (with a confidence derived
+        # from the vector distance) and flip to ready in one commit.
         embeddings = await self.ai.embed([item.original_name for item in todo])
         misses: list[tuple[ScanItem, list[float]]] = []
         for item, embedding in zip(todo, embeddings, strict=True):
-            dish = await dishes.find_similar(embedding)
-            if dish is not None:
-                item.dish_id = dish.id
-                item.status = "ready"
+            found = await dishes.find_similar(embedding)
+            if found is not None:
+                dish, confidence = found
+                self._link(item, dish, confidence, match_variant(dish, item.original_name))
             else:
                 misses.append((item, embedding))
         await session.commit()
 
-        # 3. enrichment pass — misses become dishes, committed per item so each
-        # poll picks up whatever finished since the last one.
+        # 3. enrichment pass — misses go to the AI, which decides whether the
+        # item maps to a canonical dish family at all. A match is ingested
+        # (family + attributes + variants + ingredient catalog entries) and
+        # linked; a non-match is still `ready` — the item just stays as
+        # written, with no dish. Committed per item so each poll picks up
+        # whatever finished since the last one.
+        trackables = TrackableService(session)
         for item, embedding in misses:
             extracted = extracted_by_name.get(item.original_name)
             try:
-                info = await self.ai.enrich_dish(
+                enrichment = await self.ai.enrich_dish(
                     item.original_name,
                     hints=extracted.allergen_hints if extracted else None,
                     # Extra context only — canonical dish info stays generic.
                     menu_description=item.menu_description,
                 )
-                dish = await dishes.create(info, embedding=embedding)
-                item.dish_id = dish.id
-                item.status = "ready"
+                if (
+                    not enrichment.matched
+                    or enrichment.info is None
+                    or enrichment.confidence < settings.menu_match_min_confidence
+                ):
+                    item.status = "ready"  # no confident match — stays as written
+                    await session.commit()
+                    continue
+                info = enrichment.info
+                # The family name may differ from the item ("Pad Thai Gai" ->
+                # "Pad Thai") — re-check the cache under the FAMILY name so
+                # two variants scanned in a row share one family page.
+                dish = None
+                if info.original_name.strip().lower() != item.original_name.strip().lower():
+                    [family_embedding] = await self.ai.embed([info.original_name])
+                    found = await dishes.find_similar(family_embedding)
+                    if found is not None:
+                        dish = found[0]
+                    else:
+                        embedding = family_embedding  # cache under the family name
+                if dish is None:
+                    dish = await dishes.create(info, embedding=embedding)
+                    await trackables.ensure_ingredients(enrichment.ingredient_entries)
+                variant = None
+                if enrichment.variant_key:
+                    key = slugify(enrichment.variant_key)
+                    variant = next((v for v in dish.variants if v.key == key), None)
+                self._link(
+                    item,
+                    dish,
+                    round(enrichment.confidence * 100),
+                    variant or match_variant(dish, item.original_name),
+                )
             except Exception:
                 logger.exception("enriching %r failed", item.original_name)
                 item.status = "failed"
@@ -195,3 +240,10 @@ class MenuProcessor:
 
         scan.status = "complete"
         await session.commit()
+
+    @staticmethod
+    def _link(item: ScanItem, dish, confidence: int, variant) -> None:
+        item.dish_id = dish.id
+        item.match_confidence = max(0, min(100, confidence))
+        item.dish_variant_id = variant.id if variant is not None else None
+        item.status = "ready"

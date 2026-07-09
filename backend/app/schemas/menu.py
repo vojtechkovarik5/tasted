@@ -12,10 +12,12 @@ from app.schemas.dish import DishOut
 class MenuItemStatus(StrEnum):
     """Per-item resolution state — this is what makes loading async.
 
-    ready   -> dish was found in the DB cache; `dish` is populated
-    pending -> dish is being enriched by the AI right now; `dish` is null,
-               poll GET /menus/{id} until it flips to ready
-    failed  -> enrichment failed; show the original name only
+    ready   -> resolution finished. `dish` MAY be populated (a matched
+               canonical family, with `match_confidence`) or null — a menu
+               item doesn't need a match; it then "stays as written".
+    pending -> the item is going through cache/enrichment right now; poll
+               GET /menus/{id} until it flips to ready
+    failed  -> processing failed; show the printed fields only
     """
 
     ready = "ready"
@@ -26,6 +28,15 @@ class MenuItemStatus(StrEnum):
 class MenuStatus(StrEnum):
     processing = "processing"  # at least one item still pending
     complete = "complete"  # every item is ready or failed
+
+
+class MenuTagOut(BaseModel):
+    """One printed ingredient/allergen tag on a menu item card. `key` is the
+    canonical trackables slug (null when there is none) so the client can
+    match the user's tracked things; `name` is already localized."""
+
+    key: str | None = None
+    name: str
 
 
 class MenuItemOut(BaseModel):
@@ -49,7 +60,15 @@ class MenuItemOut(BaseModel):
     menu_price: Money | None = None  # as printed on the menu
     approx_price: Money | None = None  # converted to the user's currency
     regional_note: str | None = None  # "born in Porto, you're in the right city"
-    dish: DishOut | None = None  # null while status == pending
+    # What the menu prints as contents/allergens for this item, localized
+    # ("Contains: rice noodles · chicken", "Allergens: peanuts · egg").
+    menu_ingredients: list[MenuTagOut] = []
+    menu_allergens: list[MenuTagOut] = []
+    # The OPTIONAL canonical family match. `dish` is null while pending AND
+    # when nothing matched confidently — the item then stays as written.
+    dish: DishOut | None = None
+    match_confidence: int | None = None  # 0-100, "Pad Thai · 91%"
+    matched_variant_key: str | None = None  # highlighted chip on the family page
 
 
 class MenuOut(BaseModel):

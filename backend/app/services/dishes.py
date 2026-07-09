@@ -9,7 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.db import SessionDep
 from app.domain import DishInfo
-from app.models import Dish, DishAttribute, DishPhoto, DishVote
+from app.domain.catalog import slugify
+from app.models import Dish, DishAttribute, DishPhoto, DishVariant, DishVote
 from app.repositories import DishRepository, VoteRepository
 from app.services.storage import Storage, extension_for, get_storage
 
@@ -40,12 +41,54 @@ def attribute_rows(info: DishInfo) -> list[DishAttribute]:
         # The AI estimate doubles as the immutable recalculation baseline.
         return DishAttribute(kind=kind, key=key, value=value, base_value=value)
 
-    rows = [row("allergen", _score(a.probability), a.name) for a in info.allergens]
-    rows += [row("dietary", _score(d.probability), d.name) for d in info.dietary]
+    rows = [row("allergen", _score(a.probability), slugify(a.name)) for a in info.allergens]
+    rows += [row("dietary", _score(d.probability), slugify(d.name)) for d in info.dietary]
+    rows += [
+        row("ingredient", _score(i.probability), slugify(i.name)) for i in info.ingredients
+    ]
     rows.append(row("spice", _level(info.spice_level)))
     if info.price_level is not None:
         rows.append(row("price", _level(info.price_level)))
+    # The unique (dish, kind, key) index would reject a model that repeats a
+    # slug — keep the first mention of each.
+    seen: set[tuple[str, str | None]] = set()
+    unique = []
+    for r in rows:
+        if (r.kind, r.key) in seen:
+            continue
+        seen.add((r.kind, r.key))
+        unique.append(r)
+    return unique
+
+
+def variant_rows(info: DishInfo) -> list[DishVariant]:
+    """Fan a DishInfo's variants into dish_variants rows (facets of the
+    family page, referencable by menu items)."""
+    rows = []
+    seen: set[str] = set()
+    for i, v in enumerate(info.variants):
+        key = slugify(v.key or v.name)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        rows.append(
+            DishVariant(key=key, name=v.name, description=v.description, position=i)
+        )
     return rows
+
+
+def match_variant(dish: Dish, item_name: str) -> DishVariant | None:
+    """Best-effort variant pick for a cache hit: the variant whose key or a
+    word of its name appears in the item's printed name ("Pad Thai Gai" ->
+    variant "gai"). Enrichment picks the variant explicitly; this covers
+    items resolved straight from the vector cache."""
+    haystack = item_name.lower()
+    for variant in dish.variants:
+        candidates = {variant.key.lower()}
+        candidates.update(w for w in variant.name.lower().replace("·", " ").split() if len(w) > 2)
+        if any(c in haystack for c in candidates):
+            return variant
+    return None
 
 
 class DishService:
@@ -70,16 +113,25 @@ class DishService:
         region: str | None = None,
         embedding: list[float] | None = None,
     ) -> Dish:
-        """Ingest a dish into the cache: descriptive fields to Dish.data,
-        scored fields fanned into dish_attributes rows."""
+        """Ingest a dish FAMILY into the cache: descriptive fields (incl. the
+        stored per-language translations) to Dish.data, scored fields fanned
+        into dish_attributes rows, variants into dish_variants rows."""
         dish = Dish(
             canonical_name=info.original_name,
             region=region or info.origin,
             data=info.model_dump(
-                exclude={"allergens", "dietary", "spice_level", "price_level"}
+                exclude={
+                    "allergens",
+                    "dietary",
+                    "ingredients",
+                    "spice_level",
+                    "price_level",
+                    "variants",
+                }
             ),
             name_embedding=embedding,
             attributes=attribute_rows(info),
+            variants=variant_rows(info),
         )
         self.dishes.add(dish)
         await self.session.commit()
@@ -88,10 +140,17 @@ class DishService:
 
     async def find_similar(
         self, embedding: list[float], *, max_distance: float = 0.15
-    ) -> Dish | None:
+    ) -> tuple[Dish, int] | None:
         """Semantic dish-cache lookup — the "google each item once, reuse
-        forever" core. Nearest cached dish within `max_distance`, else None."""
-        return await self.dishes.find_nearest(embedding, max_distance=max_distance)
+        forever" core. Nearest cached dish family within `max_distance` plus
+        a 0-100 match confidence derived from the cosine distance, else None.
+        """
+        found = await self.dishes.find_nearest(embedding, max_distance=max_distance)
+        if found is None:
+            return None
+        dish, distance = found
+        confidence = max(0, min(100, round((1 - distance) * 100)))
+        return dish, confidence
 
     async def vote(
         self, dish_id: uuid.UUID, user_id: uuid.UUID, kind: str, direction: int

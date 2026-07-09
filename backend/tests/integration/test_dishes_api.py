@@ -103,8 +103,13 @@ class TestGetDish:
         # Scored fields come back from dish_attributes, not the JSONB payload.
         assert info["spice_level"] == 1.0
         assert info["price_level"] == 3.0
-        assert info["allergens"] == [{"name": "gluten", "probability": 0.99}]
-        assert info["dietary"] == [{"name": "vegetarian", "probability": 0.02}]
+        # `label` is the catalog-localized display name (English fallback).
+        assert info["allergens"] == [
+            {"name": "gluten", "probability": 0.99, "label": "gluten"}
+        ]
+        assert info["dietary"] == [
+            {"name": "vegetarian", "probability": 0.02, "label": "vegetarian"}
+        ]
         assert body["photos"] == []
 
     async def test_unknown_dish_is_404(self, client):
@@ -350,8 +355,11 @@ class TestDishServiceIngest:
         embedding = [1.0] + [0.0] * (EMBEDDING_DIM - 1)
         dish = await service.create(_dish_info(), embedding=embedding)
 
-        hit = await service.find_similar(embedding)
-        assert hit is not None and hit.id == dish.id
+        found = await service.find_similar(embedding)
+        assert found is not None
+        hit, confidence = found
+        assert hit.id == dish.id
+        assert confidence == 100  # identical embedding -> distance 0
 
         orthogonal = [0.0, 1.0] + [0.0] * (EMBEDDING_DIM - 2)
         assert await service.find_similar(orthogonal) is None

@@ -24,6 +24,20 @@ class ExtractedGroup(BaseModel):
     translated_name: str | None = None
 
 
+class ExtractedIngredient(BaseModel):
+    """One ingredient printed on the menu for one item ("Obsahuje" row).
+
+    `name` is as printed (menu's language), `translated_name` the scanning
+    user's language, `key` a canonical English slug ("rice-noodles") used to
+    match the user's tracked ingredients; null when there is no sensible
+    canonical form.
+    """
+
+    name: str
+    translated_name: str | None = None
+    key: str | None = None
+
+
 class ExtractedMenuItem(BaseModel):
     """One line item as read off the menu photo.
 
@@ -47,7 +61,13 @@ class ExtractedMenuItem(BaseModel):
     group: str | None = None  # `name` of the ExtractedGroup it appears under
     price: float | None = None
     currency: str | None = None  # ISO 4217, inferred from the menu
-    allergen_hints: list[str] = []  # allergens marked on the menu itself
+    # Ingredients printed for the item (description or "contains" line),
+    # split out so the card can render "Contains: rice noodles · chicken ...".
+    ingredients: list[ExtractedIngredient] = []
+    # Allergens explicitly marked on the menu, as canonical EU-14 slugs
+    # ("gluten", "peanuts", "crustaceans", ...). Display names are resolved
+    # from the trackables catalog in the user's language.
+    allergen_hints: list[str] = []
 
     # "12. Bún Chạo Tôm" / "A3) ..." / "7 - ..." — the printed list code.
     _NUMBER_PREFIX = re.compile(r"^\s*(?P<num>\d{1,3}[a-zA-Z]?|[A-Z]\d{1,3})\s*[.):\-]\s+")

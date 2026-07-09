@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     # we give up so an unreadable photo doesn't re-queue indefinitely.
     menu_processing_max_attempts: int = 3
     menu_processing_retry_delay_seconds: int = 30
+    # Enrichment below this family-match confidence (0-1) links no dish — the
+    # menu item "stays as written" and the card shows the no-match state.
+    menu_match_min_confidence: float = 0.5
 
     # --- Clerk (auth) ------------------------------------------------------
     # JWKS_URL verifies session JWTs; secret key is for the Clerk admin SDK.

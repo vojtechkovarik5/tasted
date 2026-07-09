@@ -63,8 +63,9 @@ class DishRepository(BaseRepository):
 
     async def find_nearest(
         self, embedding: list[float], *, max_distance: float
-    ) -> Dish | None:
-        """Nearest dish by cosine distance within `max_distance`, else None."""
+    ) -> tuple[Dish, float] | None:
+        """Nearest dish by cosine distance within `max_distance` (with the
+        distance, so callers can derive a match confidence), else None."""
         distance = Dish.name_embedding.cosine_distance(embedding).label("distance")
         stmt = (
             select(Dish, distance)
@@ -74,5 +75,5 @@ class DishRepository(BaseRepository):
         )
         row = (await self.session.execute(stmt)).first()
         if row is not None and row.distance <= max_distance:
-            return row[0]
+            return row[0], float(row.distance)
         return None

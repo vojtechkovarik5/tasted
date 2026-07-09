@@ -32,12 +32,18 @@ export const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:8000
 
 export type Money = { amount: number; currency: string };
 
-export type Allergen = { name: string; probability: number };
+// `name` is the canonical slug ("gluten", "rice-noodles"); `label` is the
+// display name localized to the user's language (English fallback).
+export type Allergen = { name: string; probability: number; label: string | null };
 
-/** Probability the dish SATISFIES a diet (0.02 => almost certainly not vegetarian). */
-export type DietaryFlag = { name: string; probability: number };
+/** DIET FIT — share of versions of the dish worldwide fitting the flag
+ *  (vegetarian 0.35 => about a third of versions are vegetarian). */
+export type DietaryFlag = { name: string; probability: number; label: string | null };
 
-/** Estimated macros per typical serving; shown when the user tracks them. */
+/** Probability a typical version of the dish contains the ingredient. */
+export type Ingredient = { name: string; probability: number; label: string | null };
+
+/** Whole-dish average macros PER 100 g across variants — an AI estimate. */
 export type Macros = {
   kcal: number | null;
   protein_g: number | null;
@@ -45,20 +51,35 @@ export type Macros = {
   carbs_g: number | null;
 };
 
+/** One variant chip of a dish family ("Gai · chicken") — a facet, not a
+ *  separate page; the matched one gets highlighted. */
+export type DishVariant = {
+  id: string;
+  key: string;
+  name: string;
+  description: string | null;
+};
+
 export type DishInfo = {
-  original_name: string;
+  original_name: string; // canonical family name ("Pad Thai")
   aliases: string[];
   // English translation, only when the name is descriptive enough that
   // translating helps; proper dish names (Francesinha, Phở) stay null.
   translated_name: string | null;
+  native_name: string | null; // original script ("ผัดไทย")
+  pronunciation: string | null; // IPA ("pʰàt tʰāj")
   summary: string | null; // one-liner for list cards
-  description: string; // rich text for the detail screen
-  origin: string | null;
+  description: string; // rich text, already resolved to the user's language
+  origin: string | null; // "Thailand"
+  category: string | null; // "stir-fried rice-noodle dish"
+  national_dish: boolean;
   allergens: Allergen[];
-  dietary: DietaryFlag[];
+  dietary: DietaryFlag[]; // diet fit percentages
+  ingredients: Ingredient[]; // common ingredients, most likely first
   macros: Macros | null;
   spice_level: number; // 0..5, fractional (vote-aggregated)
   price_level: number | null; // 0..5, fractional
+  similar: string[]; // names of related families ("Pad See Ew")
 };
 
 export type Photo = { url: string; source: string }; // source: user | ai
@@ -75,6 +96,7 @@ export type Dish = {
   region: string | null;
   info: DishInfo;
   photos: Photo[];
+  variants: DishVariant[];
 };
 
 export type MenuItemStatus = "ready" | "pending" | "failed";
@@ -95,8 +117,20 @@ export type MenuItem = {
   menu_price: Money | null;
   approx_price: Money | null; // user's currency; null when same as printed
   regional_note: string | null;
-  dish: Dish | null; // null while pending
+  // What the menu itself prints for this item, localized server-side:
+  // "Contains: rice noodles · chicken", "Allergens: peanuts · egg".
+  menu_ingredients: MenuTag[];
+  menu_allergens: MenuTag[];
+  // The OPTIONAL canonical-family match. A ready item without `dish` simply
+  // "stays as written" (no confident match) — that's a normal state.
+  dish: Dish | null;
+  match_confidence: number | null; // 0-100, "Pad Thai · 91%"
+  matched_variant_key: string | null; // highlighted variant chip
 };
+
+/** One printed ingredient/allergen tag; `key` is the canonical trackables
+ *  slug (matches watch_list chips), `name` is already localized. */
+export type MenuTag = { key: string | null; name: string };
 
 export type Menu = {
   id: string;
@@ -133,12 +167,27 @@ export type Language = {
 // Only spice and price are votable; allergen/dietary values are not.
 export type VoteTarget = "spice" | "price";
 
+export type WatchKind = "allergen" | "dietary" | "ingredient";
+
 export type Preferences = {
-  watch_list: { key: string; kind: "allergen" | "dietary"; on: boolean }[];
+  // "What I track" — picked things show as tags on every menu item and dish.
+  watch_list: { key: string; kind: WatchKind; on: boolean }[];
   macros: string[];
   section_order: string[];
   currency: string;
   language: string; // ISO 639-1; app chrome stays English, this is display-only
+};
+
+/** One "What I track" catalog entry. Allergens are the fixed EU-14; diet
+ *  flags and ingredients can also be user-suggested — those come back as
+ *  `pending` (visible only to their suggester until vetted). */
+export type Trackable = {
+  id: string;
+  kind: WatchKind;
+  key: string;
+  name: string; // localized display name
+  description: string | null;
+  status: "active" | "pending";
 };
 
 // ── Fetch helpers ───────────────────────────────────────────────────────────
@@ -258,6 +307,34 @@ export const setRestrictions = (keys: string[]) =>
 export const getDietary = () => request<string[]>("/dietary");
 export const setDietary = (keys: string[]) =>
   request<string[]>("/dietary", json("POST", keys));
+
+export const getTrackedIngredients = () => request<string[]>("/ingredients");
+export const setTrackedIngredients = (keys: string[]) =>
+  request<string[]>("/ingredients", json("POST", keys));
+
+// ── "What I track" catalog ──────────────────────────────────────────────────
+
+/** List/search the catalog. `q` powers the ingredients "Search any..." box. */
+export const getTrackables = (kind?: WatchKind, q?: string) => {
+  const params = new URLSearchParams();
+  if (kind) params.set("kind", kind);
+  if (q) params.set("q", q);
+  const qs = params.toString();
+  return request<Trackable[]>(`/trackables${qs ? `?${qs}` : ""}`);
+};
+
+/** Suggest a new diet flag or ingredient (name + description). It is NOT
+ *  added to the shared catalog automatically — it lands as `pending` and an
+ *  AI check decides later; the suggester can track it right away. */
+export const suggestTrackable = (
+  kind: "dietary" | "ingredient",
+  name: string,
+  description?: string,
+) =>
+  request<Trackable>(
+    "/trackables/suggest",
+    json("POST", { kind, name, description: description || null }),
+  );
 
 export const getCurrencies = () => request<Currency[]>("/currencies");
 export const setMyCurrency = (code: string) =>

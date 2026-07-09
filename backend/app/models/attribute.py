@@ -15,10 +15,11 @@ class DishAttribute(Base):
 
     All attribute kinds share a single 0-100 scale so storage, voting and
     recalculation are uniform; only the rendering differs:
-      allergen  "gluten 99%"      — probability the dish contains it
-      dietary   "vegetarian 2%"   — probability the dish satisfies the diet
-      spice     0-100 -> 0-5 chili icons (value / 20)
-      price     0-100 -> 1-5 "€" icons
+      allergen    "gluten 99%"       — probability the dish contains it
+      dietary     "vegetarian 35%"   — share of versions fitting the diet
+      ingredient  "tamarind 92%"     — probability the dish contains it
+      spice       0-100 -> 0-5 chili icons (value / 20)
+      price       0-100 -> 1-5 "€" icons
 
     `base_value` is the AI's estimate from ingest and never changes; `value`
     is what the app shows. Votes don't touch either directly — the periodic
@@ -34,7 +35,7 @@ class DishAttribute(Base):
             "base_value BETWEEN 0 AND 100", name="ck_dish_attributes_base_value_range"
         ),
         CheckConstraint(
-            "(kind IN ('allergen', 'dietary')) = (key IS NOT NULL)",
+            "(kind IN ('allergen', 'dietary', 'ingredient')) = (key IS NOT NULL)",
             name="ck_dish_attributes_key_presence",
         ),
         # One row per attribute. NULLS NOT DISTINCT so the key-less kinds

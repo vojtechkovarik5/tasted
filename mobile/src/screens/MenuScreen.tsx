@@ -1,9 +1,13 @@
 // One menu's items (opened right after a scan, or from history).
 //
-// The listing mirrors the printed menu: items grouped under the menu's own
-// section headers, original names/descriptions first with the user's
-// translations underneath — plus the user's warnings (watched restrictions),
-// tracked macros, spice and converted prices on every card.
+// Two worlds, one link (design 3a): the card is FAITHFUL TO THE MENU —
+// original + translated name, the printed description, the printed
+// "Contains"/"Allergens" lines and the printed price (with a conversion to
+// the user's currency). Below that sits the OPTIONAL canonical-dish match:
+// family name + confidence + "About the dish ›", with tags driven by what
+// the user tracks in settings (Regional always; allergens, ingredients,
+// diet fit and macros only when tracked; spice/price level when > 0.5).
+// A ready item with no match shows "dish stays as written".
 //
 // Implements the async pattern: "ready" items render as full cards, "pending"
 // ones as skeletons. While the menu is still "processing" this screen polls
@@ -11,16 +15,19 @@
 // to ready as the backend pipeline resolves them.
 
 import { useEffect, useState } from "react";
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
-import { Menu, MenuItem, pollMenu, Preferences, resolveUrl } from "../api";
+import { Menu, MenuItem, pollMenu, Preferences } from "../api";
 import { Card, CircleBtn, IconMeter, Skeleton } from "../components";
-import { fmtMoney } from "../money";
-import { usePrefs, watchedAllergens, watchedDietary } from "../prefs";
+import { currencySymbol, fmtMoney } from "../money";
+import {
+  usePrefs,
+  watchedAllergens,
+  watchedDietary,
+  watchedIngredients,
+} from "../prefs";
 import { radius, spacing, useTheme } from "../theme";
 import AskStaffSheet from "./AskStaffSheet";
-
-const THUMB = 64;
 
 function fmtPrice(item: MenuItem): { main: string | null; approx: string | null } {
   const mp = item.menu_price;
@@ -43,46 +50,55 @@ function Tag(props: { label: string; fg: string; bg: string }) {
   );
 }
 
-/** Badges for a ready dish: every watched restriction, tracked macros,
- *  spice (always) and the regional note when the menu area has one. */
-function ItemTags(props: { item: MenuItem; prefs: Preferences }) {
+/** The match card's tag row — everything here is about the MATCHED FAMILY,
+ *  filtered by what the user tracks: Regional always (when present), watched
+ *  allergens, tracked ingredients, tracked diet fit, tracked macros. */
+function MatchTags(props: { item: MenuItem; prefs: Preferences }) {
   const { colors } = useTheme();
-  const { prefs } = props;
-  const info = props.item.dish!.info;
+  const { prefs, item } = props;
+  const info = item.dish!.info;
   const tags: { label: string; fg: string; bg: string }[] = [];
 
-  // Watched restrictions show on EVERY card — a safe card saying "Gluten 2%"
-  // is as much information as a risky one saying "Gluten 99%".
+  const display = (row: { name: string; label: string | null }) =>
+    cap(row.label ?? row.name.replace(/-/g, " "));
+
+  // Regional — every time when present.
+  if (item.regional_note) {
+    tags.push({ label: "★ Regional", fg: colors.warnText, bg: colors.warnBg });
+  }
+  // Watched allergens: warn when likely present, reassure when checked-safe.
   for (const key of watchedAllergens(prefs)) {
     const found = info.allergens.find((a) => a.name === key);
-    if (!found) {
-      tags.push({ label: `${cap(key)} —`, fg: colors.textMuted, bg: colors.surfaceAlt });
-    } else if (found.probability >= 0.5) {
-      tags.push({
-        label: `${cap(key)} ${Math.round(found.probability * 100)}%`,
-        fg: colors.danger,
-        bg: colors.dangerBg,
-      });
+    if (!found) continue;
+    if (found.probability >= 0.5) {
+      tags.push({ label: `⚠ ${display(found)}`, fg: colors.danger, bg: colors.dangerBg });
     } else {
       tags.push({
-        label: `${cap(key)} ${Math.round(found.probability * 100)}%`,
+        label: `${display(found)} ${Math.round(found.probability * 100)}%`,
         fg: colors.success,
         bg: colors.successBg,
       });
     }
   }
-  for (const key of watchedDietary(prefs)) {
-    const found = info.dietary.find((d) => d.name === key);
-    if (!found) {
-      tags.push({ label: `${cap(key)} —`, fg: colors.textMuted, bg: colors.surfaceAlt });
-    } else if (found.probability < 0.5) {
-      tags.push({ label: `× ${cap(key)}`, fg: colors.danger, bg: colors.dangerBg });
-    } else {
-      tags.push({ label: `✓ ${cap(key)}`, fg: colors.success, bg: colors.successBg });
+  // Tracked ingredients likely in the typical dish.
+  for (const key of watchedIngredients(prefs)) {
+    const found = info.ingredients.find((i) => i.name === key);
+    if (found && found.probability >= 0.5) {
+      tags.push({ label: display(found), fg: colors.text, bg: colors.surfaceAlt });
     }
   }
-
-  // Tracked macros (Profile -> "Macros I track"); skipped when none tracked.
+  // Tracked diet fit: share of versions fitting the diet.
+  for (const key of watchedDietary(prefs)) {
+    const found = info.dietary.find((d) => d.name === key);
+    if (!found) continue;
+    const pct = Math.round(found.probability * 100);
+    if (found.probability >= 0.5) {
+      tags.push({ label: `✓ ${display(found)} ${pct}%`, fg: colors.success, bg: colors.successBg });
+    } else {
+      tags.push({ label: `× ${display(found)} ${pct}%`, fg: colors.danger, bg: colors.dangerBg });
+    }
+  }
+  // Tracked macros (whole-dish average per 100 g).
   const m = info.macros;
   if (m) {
     const labels: Record<string, string | null> = {
@@ -97,82 +113,137 @@ function ItemTags(props: { item: MenuItem; prefs: Preferences }) {
     }
   }
 
-  // Regional note when the dish is a local specialty.
-  if (props.item.regional_note) {
-    tags.push({ label: "★ regional", fg: colors.warnText, bg: colors.warnBg });
-  }
-
+  const showSpice = info.spice_level > 0.5;
+  const showPriceLevel = info.price_level != null && info.price_level > 0.5;
+  if (tags.length === 0 && !showSpice && !showPriceLevel) return null;
   return (
-    <>
-      {tags.length > 0 ? (
-        <View style={styles.tagRow}>
-          {tags.map((t) => (
-            <Tag key={t.label} {...t} />
-          ))}
+    <View style={styles.tagRow}>
+      {tags.map((t) => (
+        <Tag key={t.label} {...t} />
+      ))}
+      {/* Spice + price level, only when meaningful (> 0.5): 1-5 repeated
+          icons, price level counted in the menu's own currency symbol. */}
+      {showSpice ? (
+        <View style={[styles.tag, styles.meterTag, { backgroundColor: colors.surface }]}>
+          <IconMeter level={info.spice_level} icon="🌶️" iconSize={12} />
         </View>
       ) : null}
-      {/* Spice + price level on every card — same 1-5 overlay meters as the
-          detail screen, just smaller. Price level is the AI's "how pricy is
-          this dish usually" estimate (info.price_level), not the menu price. */}
-      <View style={styles.meterRow}>
-        <IconMeter level={info.spice_level} icon="🌶️" iconSize={13} />
-        {info.price_level != null ? (
-          <IconMeter level={info.price_level} icon="€" iconSize={13} color={colors.text} />
-        ) : null}
-      </View>
-    </>
-  );
-}
-
-/** Photo thumbnail, placeholder when the dish has no photos yet. */
-function Thumb(props: { item: MenuItem }) {
-  const { colors } = useTheme();
-  const photo = props.item.dish?.photos[0];
-  if (photo) {
-    return (
-      <Image
-        source={{ uri: resolveUrl(photo.url) }}
-        style={[styles.thumb, { backgroundColor: colors.surfaceAlt }]}
-      />
-    );
-  }
-  return (
-    <View
-      style={[
-        styles.thumbPlaceholder,
-        { backgroundColor: colors.surfaceAlt, borderColor: colors.border },
-      ]}
-    >
-      <Text style={{ fontSize: 22, opacity: 0.5 }}>🍽</Text>
+      {showPriceLevel ? (
+        <View style={[styles.tag, styles.meterTag, { backgroundColor: colors.surface }]}>
+          <IconMeter
+            level={info.price_level!}
+            icon={currencySymbol(props.item.menu_price?.currency)}
+            iconSize={12}
+            color={colors.text}
+          />
+        </View>
+      ) : null}
     </View>
   );
 }
 
-/** Name + translation + printed description — same for pending and ready
- *  cards, since extraction lands before enrichment. */
-function PrintedLines(props: { item: MenuItem; numberOfLines?: number }) {
+/** The optional canonical-dish block under the printed lines: matched family
+ *  + confidence + "About the dish ›", or the explicit no-match state. */
+function MatchCard(props: {
+  item: MenuItem;
+  prefs: Preferences;
+  onOpen: (item: MenuItem) => void;
+}) {
   const { colors } = useTheme();
   const { item } = props;
+
+  if (!item.dish) {
+    // Ready but unmatched — a normal state, the menu stays the truth.
+    return (
+      <View style={[styles.noMatch, { borderColor: colors.border }]}>
+        <Text style={{ color: colors.textMuted, fontSize: 13 }}>
+          ✦ No confident match — dish stays as written
+        </Text>
+      </View>
+    );
+  }
+  return (
+    <Pressable onPress={() => props.onOpen(item)}>
+      <View style={[styles.match, { backgroundColor: colors.surfaceAlt }]}>
+        <View style={styles.matchHeader}>
+          <Text style={{ color: colors.text, fontWeight: "700", flexShrink: 1 }}>
+            ✦ {item.dish.canonical_name}
+            {item.match_confidence != null ? (
+              <Text style={{ color: colors.textMuted, fontWeight: "400" }}>
+                {" "}
+                · {item.match_confidence}%
+              </Text>
+            ) : null}
+          </Text>
+          <Text style={{ color: colors.warnText, fontWeight: "700", fontSize: 13 }}>
+            About the dish ›
+          </Text>
+        </View>
+        <MatchTags item={item} prefs={props.prefs} />
+      </View>
+    </Pressable>
+  );
+}
+
+/** The printed lines — faithful to the menu: original name (muted, with the
+ *  printed number), the user-language name in bold, the quoted description,
+ *  and the printed Contains/Allergens rows. Same for pending and ready
+ *  cards, since extraction lands before enrichment. */
+function PrintedLines(props: { item: MenuItem; prefs: Preferences; numberOfLines?: number }) {
+  const { colors } = useTheme();
+  const { item, prefs } = props;
   const description = item.menu_description_translated ?? item.menu_description;
+  const trackedIngredients = watchedIngredients(prefs);
+  const trackedAllergens = watchedAllergens(prefs);
   return (
     <>
-      <Text style={{ color: colors.text, fontSize: 17, fontWeight: "700" }}>
-        {item.menu_number ? (
-          <Text style={{ color: colors.textMuted }}>{item.menu_number}. </Text>
-        ) : null}
+      <Text style={{ color: colors.textMuted, fontSize: 13 }}>
+        {item.menu_number ? `${item.menu_number}. ` : ""}
         {item.original_name}
       </Text>
-      {item.translated_name ? (
-        <Text style={{ color: colors.textMuted, fontSize: 13, marginTop: 1 }}>
-          {item.translated_name}
-        </Text>
-      ) : null}
+      <Text style={{ color: colors.text, fontSize: 17, fontWeight: "700", marginTop: 1 }}>
+        {item.translated_name ?? item.original_name}
+      </Text>
       {description ? (
         <Text
-          style={{ color: colors.textMuted, marginTop: 2 }}
+          style={{ color: colors.textMuted, marginTop: 2, fontStyle: "italic" }}
           numberOfLines={props.numberOfLines ?? 2}
         >
-          {description}
+          „{description}“
+        </Text>
+      ) : null}
+      {item.menu_ingredients.length > 0 ? (
+        <Text style={{ color: colors.text, fontSize: 13, marginTop: 4 }}>
+          <Text style={{ fontWeight: "700" }}>Contains: </Text>
+          {item.menu_ingredients.map((ing, i) => (
+            <Text
+              key={`${ing.key ?? ing.name}-${i}`}
+              style={
+                ing.key && trackedIngredients.has(ing.key)
+                  ? { fontWeight: "700", color: colors.warnText }
+                  : undefined
+              }
+            >
+              {i > 0 ? " · " : ""}
+              {ing.name}
+            </Text>
+          ))}
+        </Text>
+      ) : null}
+      {item.menu_allergens.length > 0 ? (
+        <Text style={{ color: colors.danger, fontSize: 13, marginTop: 2 }}>
+          <Text style={{ fontWeight: "700" }}>Allergens: </Text>
+          {item.menu_allergens.map((a, i) => (
+            <Text
+              key={`${a.key ?? a.name}-${i}`}
+              style={
+                a.key && trackedAllergens.has(a.key) ? { fontWeight: "800" } : undefined
+              }
+            >
+              {i > 0 ? " · " : ""}
+              {a.name}
+            </Text>
+          ))}
         </Text>
       ) : null}
     </>
@@ -194,23 +265,25 @@ function PriceCol(props: { item: MenuItem }) {
   );
 }
 
-/** Skeleton card while the AI is still identifying a dish. The printed
- *  fields (name, translation, description, price) are already extracted. */
-function PendingCard(props: { item: MenuItem }) {
+/** Skeleton card while the AI is still resolving the match. The printed
+ *  fields (names, description, contains/allergens, price) already landed. */
+function PendingCard(props: { item: MenuItem; prefs: Preferences }) {
   const { colors } = useTheme();
   return (
     <Card style={{ marginTop: spacing.m }}>
       <View style={styles.cardRow}>
-        <Skeleton style={{ width: THUMB, height: THUMB, borderRadius: radius.s }} />
         <View style={{ flex: 1, gap: 2 }}>
-          <PrintedLines item={props.item} />
-          <Skeleton style={{ height: 12, width: "55%", marginTop: spacing.s }} />
+          <PrintedLines item={props.item} prefs={props.prefs} />
         </View>
         <PriceCol item={props.item} />
       </View>
-      <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: spacing.s }}>
-        {props.item.status === "failed" ? "couldn't identify this one" : "identifying dish…"}
-      </Text>
+      {props.item.status === "failed" ? (
+        <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: spacing.s }}>
+          couldn't process this one
+        </Text>
+      ) : (
+        <Skeleton style={{ height: 44, borderRadius: radius.m, marginTop: spacing.m }} />
+      )}
     </Card>
   );
 }
@@ -224,37 +297,33 @@ function ItemCard(props: {
   const { colors } = useTheme();
   const { item } = props;
 
-  if (item.status !== "ready" || !item.dish) return <PendingCard item={item} />;
+  if (item.status !== "ready") return <PendingCard item={item} prefs={props.prefs} />;
 
   return (
-    <Pressable onPress={() => props.onOpen(item)}>
-      <Card style={{ marginTop: spacing.m }}>
-        <View style={styles.cardRow}>
-          <Thumb item={item} />
-          <View style={{ flex: 1 }}>
-            <PrintedLines item={item} />
-            <ItemTags item={item} prefs={props.prefs} />
-          </View>
-          <View style={{ alignItems: "flex-end", gap: spacing.s }}>
-            <PriceCol item={item} />
-            <Pressable
-              // stopPropagation: on web the click would bubble to the card's
-              // Pressable and ALSO open the dish detail over the sheet.
-              onPress={(e) => {
-                e?.stopPropagation?.();
-                props.onAsk(item);
-              }}
-              hitSlop={8}
-              style={[styles.askBtn, { borderColor: colors.border }]}
-            >
-              <Text style={{ color: colors.text, fontSize: 12, fontWeight: "600" }}>
-                🗣️ Ask
-              </Text>
-            </Pressable>
-          </View>
+    <Card style={{ marginTop: spacing.m }}>
+      <View style={styles.cardRow}>
+        <View style={{ flex: 1 }}>
+          <PrintedLines item={item} prefs={props.prefs} />
         </View>
-      </Card>
-    </Pressable>
+        <View style={{ alignItems: "flex-end", gap: spacing.s }}>
+          <PriceCol item={item} />
+          <Pressable
+            onPress={(e) => {
+              e?.stopPropagation?.();
+              props.onAsk(item);
+            }}
+            hitSlop={8}
+            style={[styles.askBtn, { borderColor: colors.border }]}
+          >
+            <Text style={{ color: colors.text, fontSize: 12, fontWeight: "600" }}>
+              🗣️ Ask
+            </Text>
+          </Pressable>
+        </View>
+      </View>
+      {/* The optional link into the canonical world. */}
+      <MatchCard item={item} prefs={props.prefs} onOpen={props.onOpen} />
+    </Card>
   );
 }
 
@@ -377,22 +446,31 @@ const styles = StyleSheet.create({
   },
   groupTitle: { fontSize: 18, fontWeight: "800" },
   cardRow: { flexDirection: "row", gap: spacing.m, alignItems: "flex-start" },
-  thumb: { width: THUMB, height: THUMB, borderRadius: radius.s },
-  thumbPlaceholder: {
-    width: THUMB,
-    height: THUMB,
-    borderRadius: radius.s,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderStyle: "dashed",
-  },
   tagRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs + 2, marginTop: spacing.s },
-  meterRow: { flexDirection: "row", alignItems: "center", gap: spacing.l, marginTop: spacing.s },
   tag: {
     paddingHorizontal: spacing.s,
     paddingVertical: 3,
     borderRadius: radius.pill,
+  },
+  meterTag: { paddingVertical: 2 },
+  match: {
+    borderRadius: radius.m,
+    padding: spacing.m,
+    marginTop: spacing.m,
+  },
+  matchHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: spacing.m,
+  },
+  noMatch: {
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderRadius: radius.m,
+    padding: spacing.m,
+    marginTop: spacing.m,
+    alignItems: "center",
   },
   askBtn: {
     borderWidth: 1,
