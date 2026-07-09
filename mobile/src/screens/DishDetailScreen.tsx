@@ -3,42 +3,52 @@
 // rows with inline voting, and the "Ask staff" CTA (opens the ask-staff
 // bottom sheet, design 2a — see AskStaffSheet).
 //
-// Voting is optimistic: arrows nudge the local value slightly (a vote is one
-// voice, not a whole step) and fire the API call in the background — the
-// server reconciles the aggregate on the next fetch.
+// Voting: one vote per user per meter. The displayed level does NOT move on
+// tap — votes are folded in by periodic recalculation server-side — the
+// pressed arrow just fills in ("you voted") and pressing the other arrow
+// changes the vote. GET /dishes/{id}/votes restores the marks on open.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
-import { MenuItem, resolveUrl, sendVote } from "../api";
+import { getMyVotes, MenuItem, MyVotes, resolveUrl, sendVote } from "../api";
 import { Bar, CircleBtn, IconMeter, PrimaryButton } from "../components";
 import { fmtMoney } from "../money";
 import { isWatched, usePrefs, watchedDietary } from "../prefs";
 import { radius, spacing, useTheme } from "../theme";
 import AskStaffSheet from "./AskStaffSheet";
 
-const VOTE_NUDGE = 0.25; // optimistic local shift per vote
-
-/** Label + vote arrows around a fractional icon meter. */
+/** Label + vote arrows around a fractional icon meter. The arrow matching
+ *  the user's standing vote renders filled. */
 function LevelRow(props: {
   label: string;
   level: number;
   icon: string;
   color?: string;
+  myVote: "up" | "down" | null;
   onVote: (dir: "up" | "down") => void;
 }) {
   const { colors } = useTheme();
   return (
     <View style={styles.levelRow}>
       <Text style={[styles.levelLabel, { color: colors.text }]}>{props.label}</Text>
-      <CircleBtn label="←" onPress={() => props.onVote("down")} />
+      <CircleBtn
+        label="←"
+        active={props.myVote === "down"}
+        onPress={() => props.onVote("down")}
+      />
       <View style={{ flex: 1, alignItems: "center" }}>
         <IconMeter level={props.level} icon={props.icon} color={props.color} />
         <Text style={{ color: colors.textMuted, fontSize: 11 }}>
           {props.level.toFixed(1)} / 5
+          {props.myVote ? (
+            <Text style={{ color: colors.primary, fontWeight: "600" }}>
+              {` · you voted ${props.myVote === "up" ? "more" : "less"}`}
+            </Text>
+          ) : null}
         </Text>
       </View>
-      <CircleBtn label="→" onPress={() => props.onVote("up")} />
+      <CircleBtn label="→" active={props.myVote === "up"} onPress={() => props.onVote("up")} />
     </View>
   );
 }
@@ -57,15 +67,18 @@ export default function DishDetailScreen(props: {
   const photo = dish.photos[0];
   const dietaryWatched = watchedDietary(prefs);
 
-  // Optimistic local copies of the votable values.
-  const [spice, setSpice] = useState(info.spice_level);
-  const [price, setPrice] = useState(info.price_level ?? 0);
   const [askOpen, setAskOpen] = useState(false);
+  // My standing votes — drives the filled-arrow "you voted" state. Signed-out
+  // users get no marks (the fetch 401s silently) and their votes are dropped
+  // server-side the same way.
+  const [myVotes, setMyVotes] = useState<MyVotes>({ spice: null, price: null });
+  useEffect(() => {
+    getMyVotes(dish.id).then(setMyVotes).catch(() => {});
+  }, [dish.id]);
 
   function voteLevel(target: "spice" | "price", dir: "up" | "down") {
-    const delta = dir === "up" ? VOTE_NUDGE : -VOTE_NUDGE;
-    if (target === "spice") setSpice((s) => Math.max(0, Math.min(5, s + delta)));
-    else setPrice((p) => Math.max(0, Math.min(5, p + delta)));
+    if (myVotes[target] === dir) return; // already voted this way — no-op
+    setMyVotes((v) => ({ ...v, [target]: dir })); // mark the arrow, not the meter
     sendVote(dish.id, target, dir).catch(() => {}); // fire-and-forget
   }
 
@@ -193,15 +206,17 @@ export default function DishDetailScreen(props: {
           {/* ── Spice + price level meters (fractional fill) ── */}
           <LevelRow
             label="Spice"
-            level={spice}
+            level={info.spice_level}
             icon="🌶️"
+            myVote={myVotes.spice}
             onVote={(d) => voteLevel("spice", d)}
           />
           <LevelRow
             label="Price level"
-            level={price}
+            level={info.price_level ?? 0}
             icon="€"
             color={colors.text}
+            myVote={myVotes.price}
             onVote={(d) => voteLevel("price", d)}
           />
 

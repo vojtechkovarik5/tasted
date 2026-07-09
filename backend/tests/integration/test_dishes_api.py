@@ -12,7 +12,8 @@ pipeline uses) and read them back over HTTP.
 Scored attributes round-trip through a shared 0-100 scale:
   spice/price value = level * 20   (level 1.0 → 20, back to 1.0)
   allergen/dietary value = round(probability * 100)
-A vote nudges the stored value by ±`VOTE_STEP` (see services/dishes.py).
+A vote never moves the value directly — the periodic recalculation applies
+value = base_value ± `VOTE_STEP` * net votes (see services/dishes.py).
 
 Auth is fake mode: `Authorization: Bearer alice` resolves to the user with
 clerk id "alice" (created lazily), so votes are attributable per user.
@@ -141,14 +142,27 @@ class TestVote:
         resp = await client.get(f"/dishes/{dish_id}")
         return resp.json()["info"]["spice_level"]
 
-    async def test_up_vote_nudges_the_value(self, client, db_session):
+    async def _recalc(self, db_session) -> None:
+        """What the periodic beat task runs (tasks.py wraps this)."""
+        await DishService(db_session).recalculate_attributes()
+
+    async def test_vote_does_not_move_the_value(self, client, db_session):
         dish_id = await _seed_dish(db_session)  # spice starts at value 20 (1.0)
 
         resp = await client.post(f"/dishes/{dish_id}/vote/spice", json={"direction": "up"}, headers=ALICE)
 
         assert resp.status_code == 200
         assert resp.json() == {"accepted": True}
-        # 20 + VOTE_STEP -> 24, rendered as 24/20 = 1.2
+        # Votes are only folded in by the periodic recalculation.
+        assert await self._spice(client, dish_id) == 1.0
+
+    async def test_recalculation_folds_votes_into_the_value(self, client, db_session):
+        dish_id = await _seed_dish(db_session)
+
+        await client.post(f"/dishes/{dish_id}/vote/spice", json={"direction": "up"}, headers=ALICE)
+        await self._recalc(db_session)
+
+        # base 20 + VOTE_STEP -> 24, rendered as 24/20 = 1.2
         assert await self._spice(client, dish_id) == (20 + VOTE_STEP) / 20
 
     async def test_repeat_vote_is_idempotent(self, client, db_session):
@@ -156,8 +170,9 @@ class TestVote:
 
         await client.post(f"/dishes/{dish_id}/vote/spice", json={"direction": "up"}, headers=ALICE)
         await client.post(f"/dishes/{dish_id}/vote/spice", json={"direction": "up"}, headers=ALICE)
+        await self._recalc(db_session)
 
-        # Same user, same direction — nudged once, not twice.
+        # Same user, same direction — one vote, counted once.
         assert await self._spice(client, dish_id) == (20 + VOTE_STEP) / 20
 
     async def test_flipping_a_vote_reverses_it(self, client, db_session):
@@ -165,8 +180,10 @@ class TestVote:
 
         await client.post(f"/dishes/{dish_id}/vote/spice", json={"direction": "up"}, headers=ALICE)
         await client.post(f"/dishes/{dish_id}/vote/spice", json={"direction": "down"}, headers=ALICE)
+        await self._recalc(db_session)
 
-        # up (+VOTE_STEP) then flip to down (-2*VOTE_STEP): 20 + 4 - 8 = 16
+        # The flip replaces the vote: net -1 from the SAME baseline (not a
+        # double-step swing off a moved value).
         assert await self._spice(client, dish_id) == (20 - VOTE_STEP) / 20
 
     async def test_votes_from_different_users_accumulate(self, client, db_session):
@@ -174,17 +191,59 @@ class TestVote:
 
         await client.post(f"/dishes/{dish_id}/vote/spice", json={"direction": "up"}, headers=ALICE)
         await client.post(f"/dishes/{dish_id}/vote/spice", json={"direction": "up"}, headers=BOB)
+        await self._recalc(db_session)
 
-        # One nudge per distinct user.
+        # One step per distinct user, all anchored on the baseline.
         assert await self._spice(client, dish_id) == (20 + 2 * VOTE_STEP) / 20
+
+    async def test_recalculation_is_stable_across_runs(self, client, db_session):
+        dish_id = await _seed_dish(db_session)
+
+        await client.post(f"/dishes/{dish_id}/vote/spice", json={"direction": "up"}, headers=ALICE)
+        await self._recalc(db_session)
+        await self._recalc(db_session)
+
+        # Re-running without new votes must not drift the value.
+        assert await self._spice(client, dish_id) == (20 + VOTE_STEP) / 20
+
+    async def test_my_votes_reflect_what_i_pressed(self, client, db_session):
+        # Levels only shift on recalculation, so the UI restores the pressed
+        # arrow from GET /dishes/{id}/votes rather than from the value.
+        dish_id = await _seed_dish(db_session)
+
+        resp = await client.get(f"/dishes/{dish_id}/votes", headers=ALICE)
+        assert resp.status_code == 200
+        assert resp.json() == {"spice": None, "price": None}
+
+        await client.post(f"/dishes/{dish_id}/vote/spice", json={"direction": "up"}, headers=ALICE)
+        resp = await client.get(f"/dishes/{dish_id}/votes", headers=ALICE)
+        assert resp.json() == {"spice": "up", "price": None}
+
+        # Changing your mind flips the stored vote...
+        await client.post(f"/dishes/{dish_id}/vote/spice", json={"direction": "down"}, headers=ALICE)
+        resp = await client.get(f"/dishes/{dish_id}/votes", headers=ALICE)
+        assert resp.json() == {"spice": "down", "price": None}
+
+        # ...and votes are per user: bob still sees none of alice's.
+        resp = await client.get(f"/dishes/{dish_id}/votes", headers=BOB)
+        assert resp.json() == {"spice": None, "price": None}
+
+    async def test_my_votes_unknown_dish_is_404(self, client):
+        resp = await client.get(f"/dishes/{uuid.uuid4()}/votes", headers=ALICE)
+        assert resp.status_code == 404
 
     async def test_vote_creates_missing_attribute_at_midpoint(self, client, db_session):
         # A dish ingested without a price (price_level=None) has no price row;
-        # the first vote seeds it from the neutral 50.
+        # the first vote seeds it at the neutral 50 (also its baseline), and
+        # the vote itself only lands on recalculation.
         dish_id = await _seed_dish(db_session, _dish_info(price_level=None))
 
         await client.post(f"/dishes/{dish_id}/vote/price", json={"direction": "up"}, headers=ALICE)
 
+        resp = await client.get(f"/dishes/{dish_id}")
+        assert resp.json()["info"]["price_level"] == 50 / 20
+
+        await self._recalc(db_session)
         resp = await client.get(f"/dishes/{dish_id}")
         assert resp.json()["info"]["price_level"] == (50 + VOTE_STEP) / 20
 

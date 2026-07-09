@@ -64,9 +64,11 @@ def upgrade() -> None:
     sa.Column('kind', sa.String(length=16), nullable=False),
     sa.Column('key', sa.String(length=64), nullable=True),
     sa.Column('value', sa.SmallInteger(), nullable=False),
+    sa.Column('base_value', sa.SmallInteger(), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.CheckConstraint("(kind IN ('allergen', 'dietary')) = (key IS NOT NULL)", name='ck_dish_attributes_key_presence'),
     sa.CheckConstraint('value BETWEEN 0 AND 100', name='ck_dish_attributes_value_range'),
+    sa.CheckConstraint('base_value BETWEEN 0 AND 100', name='ck_dish_attributes_base_value_range'),
     sa.ForeignKeyConstraint(['dish_id'], ['dishes.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id')
     )

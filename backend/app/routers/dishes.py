@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
 from app.auth import CurrentUserDep
-from app.schemas import DishOut, VoteAck, VoteDirection, VoteTarget
+from app.schemas import DishOut, MyVotesOut, VoteAck, VoteDirection, VoteTarget
 from app.services.dishes import DishServiceDep
 
 router = APIRouter(prefix="/dishes", tags=["dishes"])
@@ -43,14 +43,35 @@ async def vote(
     """Nudge the dish's spice or price level.
 
     One vote per user per attribute — a repeat is idempotent, the opposite
-    direction flips it. The client nudges optimistically and reconciles from
-    the next dish/menu fetch, so only an ack is returned.
+    direction flips it. The displayed level doesn't move right away (votes
+    are folded in by periodic recalculation), so the client only marks the
+    pressed arrow; GET /dishes/{id}/votes restores that mark across reloads.
     """
     direction = 1 if body.direction == VoteDirection.up else -1
     value = await service.vote(dish_id, user_id, target.value, direction)
     if value is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Dish not found")
     return VoteAck()
+
+
+@router.get("/{dish_id}/votes", response_model=MyVotesOut)
+async def my_votes(
+    dish_id: uuid.UUID, user_id: CurrentUserDep, service: DishServiceDep
+) -> MyVotesOut:
+    """The current user's standing spice/price votes on this dish — lets the
+    UI show "you already voted" (and which way) after a reload."""
+    votes = await service.my_votes(dish_id, user_id)
+    if votes is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Dish not found")
+
+    def to_direction(direction: int | None) -> VoteDirection | None:
+        if direction is None:
+            return None
+        return VoteDirection.up if direction > 0 else VoteDirection.down
+
+    return MyVotesOut(
+        spice=to_direction(votes.get("spice")), price=to_direction(votes.get("price"))
+    )
 
 
 @router.post("/{dish_id}/photo", response_model=PhotoAck)

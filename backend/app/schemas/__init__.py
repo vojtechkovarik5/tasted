@@ -13,7 +13,7 @@ from app.schemas.menu import (
     MenuStatus,
     MenuSummaryOut,
 )
-from app.schemas.vote import VoteAck, VoteDirection, VoteTarget
+from app.schemas.vote import MyVotesOut, VoteAck, VoteDirection, VoteTarget
 
 __all__ = [
     "CurrencyOut",
@@ -24,6 +24,7 @@ __all__ = [
     "MenuOut",
     "MenuStatus",
     "MenuSummaryOut",
+    "MyVotesOut",
     "VoteAck",
     "VoteDirection",
     "VoteTarget",

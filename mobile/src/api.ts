@@ -224,12 +224,20 @@ export async function pollMenu(
 
 export const getDish = (id: string) => request<Dish>(`/dishes/${id}`);
 
-/** Nudge spice / price level. Fire-and-forget from the UI (optimistic). */
+/** Nudge spice / price level. Fire-and-forget from the UI. The displayed
+ *  level doesn't move right away — votes are folded in by periodic
+ *  recalculation — the UI just marks the pressed arrow. */
 export const sendVote = (dishId: string, target: VoteTarget, direction: "up" | "down") =>
   request<{ accepted: boolean }>(
     `/dishes/${dishId}/vote/${target}`,
     json("POST", { direction }),
   );
+
+/** My standing votes on a dish — restores the pressed-arrow state across
+ *  reloads (one vote per user per target; pressing the other arrow flips). */
+export type MyVotes = { spice: "up" | "down" | null; price: "up" | "down" | null };
+
+export const getMyVotes = (dishId: string) => request<MyVotes>(`/dishes/${dishId}/votes`);
 
 /** Upload a user photo of a dish (goes through moderation). */
 export async function uploadDishPhoto(dishId: string, photoUri: string) {

@@ -20,13 +20,19 @@ class DishAttribute(Base):
       spice     0-100 -> 0-5 chili icons (value / 20)
       price     0-100 -> 1-5 "€" icons
 
-    `value` is what the app shows. The AI fills it on ingest; a periodic
-    task (Celery, later) will recalculate it from votes in a recent window.
+    `base_value` is the AI's estimate from ingest and never changes; `value`
+    is what the app shows. Votes don't touch either directly — the periodic
+    recalculation task (tasks.py:recalculate_dish_attributes) recomputes
+    `value` from `base_value` + the net votes, so a vote is a voice in the
+    next recalc, not an instant nudge.
     """
 
     __tablename__ = "dish_attributes"
     __table_args__ = (
         CheckConstraint("value BETWEEN 0 AND 100", name="ck_dish_attributes_value_range"),
+        CheckConstraint(
+            "base_value BETWEEN 0 AND 100", name="ck_dish_attributes_base_value_range"
+        ),
         CheckConstraint(
             "(kind IN ('allergen', 'dietary')) = (key IS NOT NULL)",
             name="ck_dish_attributes_key_presence",
@@ -51,6 +57,8 @@ class DishAttribute(Base):
     # Attribute slug for allergen/dietary ("gluten", "vegetarian"); NULL for spice/price.
     key: Mapped[str | None] = mapped_column(String(64))
     value: Mapped[int] = mapped_column(SmallInteger)  # displayed score, 0-100
+    # AI baseline from ingest (0-100), immutable — recalculation anchor.
+    base_value: Mapped[int] = mapped_column(SmallInteger)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

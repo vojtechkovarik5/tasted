@@ -52,11 +52,14 @@ export function Chip(props: {
   );
 }
 
-/** Small circular button — back arrow, vote arrows, steppers. */
+/** Small circular button — back arrow, vote arrows, steppers.
+ *  `active` renders it filled in the primary color (e.g. the vote arrow the
+ *  user already pressed) so "your vote" is unmistakable at a glance. */
 export function CircleBtn(props: {
   label: string;
   onPress?: () => void;
   disabled?: boolean;
+  active?: boolean;
   size?: number;
 }) {
   const { colors } = useTheme();
@@ -70,15 +73,23 @@ export function CircleBtn(props: {
         width: size,
         height: size,
         borderRadius: size / 2,
-        borderWidth: 1,
-        borderColor: colors.border,
-        backgroundColor: colors.surface,
+        borderWidth: props.active ? 2 : 1,
+        borderColor: props.active ? colors.primary : colors.border,
+        backgroundColor: props.active ? colors.primary : colors.surface,
         alignItems: "center",
         justifyContent: "center",
         opacity: props.disabled ? 0.4 : 1,
       }}
     >
-      <Text style={{ color: colors.text, fontSize: size * 0.45 }}>{props.label}</Text>
+      <Text
+        style={{
+          color: props.active ? colors.onPrimary : colors.text,
+          fontSize: size * 0.45,
+          fontWeight: props.active ? "700" : "400",
+        }}
+      >
+        {props.label}
+      </Text>
     </Pressable>
   );
 }

@@ -21,3 +21,15 @@ class VoteDirection(StrEnum):
 
 class VoteAck(BaseModel):
     accepted: bool = True
+
+
+class MyVotesOut(BaseModel):
+    """The current user's standing votes on a dish (GET /dishes/{id}/votes).
+
+    Levels only shift on periodic recalculation, so the UI can't read a vote
+    back from the value — this is what lets it highlight the pressed arrow
+    across reloads. Null = not voted on that target.
+    """
+
+    spice: VoteDirection | None = None
+    price: VoteDirection | None = None

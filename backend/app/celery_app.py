@@ -32,5 +32,11 @@ celery_app.conf.update(
             "task": "reschedule_stuck_menus",
             "schedule": 300.0,  # every 5 minutes
         },
+        # Fold votes into displayed spice/price values — voting itself never
+        # moves a value, this is the only place levels shift.
+        "recalculate-dish-attributes": {
+            "task": "recalculate_dish_attributes",
+            "schedule": 900.0,  # every 15 minutes
+        },
     },
 )

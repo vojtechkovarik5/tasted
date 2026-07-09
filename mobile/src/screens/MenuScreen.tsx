@@ -14,7 +14,7 @@ import { useEffect, useState } from "react";
 import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { Menu, MenuItem, pollMenu, Preferences, resolveUrl } from "../api";
-import { Card, CircleBtn, Skeleton } from "../components";
+import { Card, CircleBtn, IconMeter, Skeleton } from "../components";
 import { fmtMoney } from "../money";
 import { usePrefs, watchedAllergens, watchedDietary } from "../prefs";
 import { radius, spacing, useTheme } from "../theme";
@@ -97,22 +97,30 @@ function ItemTags(props: { item: MenuItem; prefs: Preferences }) {
     }
   }
 
-  // Spice on every card; regional note when the dish is a local specialty.
-  tags.push({
-    label: `🌶 ${info.spice_level.toFixed(1)}`,
-    fg: colors.text,
-    bg: colors.surfaceAlt,
-  });
+  // Regional note when the dish is a local specialty.
   if (props.item.regional_note) {
     tags.push({ label: "★ regional", fg: colors.warnText, bg: colors.warnBg });
   }
 
   return (
-    <View style={styles.tagRow}>
-      {tags.map((t) => (
-        <Tag key={t.label} {...t} />
-      ))}
-    </View>
+    <>
+      {tags.length > 0 ? (
+        <View style={styles.tagRow}>
+          {tags.map((t) => (
+            <Tag key={t.label} {...t} />
+          ))}
+        </View>
+      ) : null}
+      {/* Spice + price level on every card — same 1-5 overlay meters as the
+          detail screen, just smaller. Price level is the AI's "how pricy is
+          this dish usually" estimate (info.price_level), not the menu price. */}
+      <View style={styles.meterRow}>
+        <IconMeter level={info.spice_level} icon="🌶️" iconSize={13} />
+        {info.price_level != null ? (
+          <IconMeter level={info.price_level} icon="€" iconSize={13} color={colors.text} />
+        ) : null}
+      </View>
+    </>
   );
 }
 
@@ -380,6 +388,7 @@ const styles = StyleSheet.create({
     borderStyle: "dashed",
   },
   tagRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs + 2, marginTop: spacing.s },
+  meterRow: { flexDirection: "row", alignItems: "center", gap: spacing.l, marginTop: spacing.s },
   tag: {
     paddingHorizontal: spacing.s,
     paddingVertical: 3,

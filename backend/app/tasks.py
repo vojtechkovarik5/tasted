@@ -71,6 +71,29 @@ def reschedule_stuck_menus_task() -> None:
     asyncio.run(run())
 
 
+@celery_app.task(name="recalculate_dish_attributes")
+def recalculate_dish_attributes_task() -> None:
+    """Fold votes into the displayed attribute values (see celery_app beat).
+
+    Voting itself never moves a value — POST /dishes/{id}/vote only records
+    the vote. This task recomputes value = base_value + VOTE_STEP * net votes
+    for every voted attribute, so levels drift periodically, not per tap.
+    """
+    from app.db import SessionLocal, engine
+    from app.services.dishes import DishService
+
+    async def run() -> None:
+        try:
+            async with SessionLocal() as session:
+                changed = await DishService(session).recalculate_attributes()
+            if changed:
+                logger.info("recalculated %d dish attribute value(s)", changed)
+        finally:
+            await engine.dispose()  # loop-bound asyncpg pool, see process_menu_task
+
+    asyncio.run(run())
+
+
 @celery_app.task(name="refresh_currency_rates", autoretry_for=(Exception,), retry_backoff=60,
                  max_retries=5)
 def refresh_currency_rates_task() -> None:

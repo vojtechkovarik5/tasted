@@ -13,9 +13,9 @@ from app.models import Dish, DishAttribute, DishPhoto, DishVote
 from app.repositories import DishRepository, VoteRepository
 from app.services.storage import Storage, extension_for, get_storage
 
-# One net vote nudges a 0-100 attribute value by this much (0.2 of an icon).
-# Raw votes are kept, so the periodic recalculation task can later replace
-# this incremental nudge with a proper aggregate without losing anything.
+# One net vote shifts a 0-100 attribute value by this much (0.2 of an icon)
+# when the periodic recalculation runs: value = base_value + VOTE_STEP * net.
+# Votes never move the value directly — they're counted at recalc time.
 VOTE_STEP = 4
 
 
@@ -36,17 +36,15 @@ def attribute_rows(info: DishInfo) -> list[DishAttribute]:
     recalculable), only descriptive fields stay in Dish.data. DishOut merges
     them back together on the way out.
     """
-    rows = [
-        DishAttribute(kind="allergen", key=a.name, value=_score(a.probability))
-        for a in info.allergens
-    ]
-    rows += [
-        DishAttribute(kind="dietary", key=d.name, value=_score(d.probability))
-        for d in info.dietary
-    ]
-    rows.append(DishAttribute(kind="spice", value=_level(info.spice_level)))
+    def row(kind: str, value: int, key: str | None = None) -> DishAttribute:
+        # The AI estimate doubles as the immutable recalculation baseline.
+        return DishAttribute(kind=kind, key=key, value=value, base_value=value)
+
+    rows = [row("allergen", _score(a.probability), a.name) for a in info.allergens]
+    rows += [row("dietary", _score(d.probability), d.name) for d in info.dietary]
+    rows.append(row("spice", _level(info.spice_level)))
     if info.price_level is not None:
-        rows.append(DishAttribute(kind="price", value=_level(info.price_level)))
+        rows.append(row("price", _level(info.price_level)))
     return rows
 
 
@@ -98,37 +96,60 @@ class DishService:
     async def vote(
         self, dish_id: uuid.UUID, user_id: uuid.UUID, kind: str, direction: int
     ) -> int | None:
-        """Record a user's spice/price nudge and shift the displayed value.
+        """Record a user's spice/price vote. The displayed value does NOT
+        move — votes are folded in by the periodic recalculation task
+        (value = base_value + VOTE_STEP * net votes).
 
         One vote per user per attribute: a repeat in the same direction is a
         no-op, the opposite direction flips the vote. The attribute row is
-        read FOR UPDATE and everything commits once at the end, so concurrent
-        votes can't lose nudges. Returns the new 0-100 value, or None when
-        the dish doesn't exist.
+        read FOR UPDATE so two first-votes can't seed it twice. Returns the
+        current 0-100 value (unchanged), or None when the dish doesn't exist.
         """
         if await self.dishes.get(dish_id) is None:
             return None
         attr = await self.dishes.get_attribute(dish_id, kind, for_update=True)
         if attr is None:
             # Dish was ingested without this attribute (e.g. unknown price):
-            # start from the neutral midpoint.
-            attr = DishAttribute(dish_id=dish_id, kind=kind, value=50)
+            # seed it at the neutral midpoint, which is also its baseline.
+            attr = DishAttribute(dish_id=dish_id, kind=kind, value=50, base_value=50)
             self.dishes.add(attr)
             await self.dishes.flush()
 
         existing = await self.votes.get(attr.id, user_id)
         if existing is None:
             self.votes.add(DishVote(attribute_id=attr.id, user_id=user_id, direction=direction))
-            delta = direction
-        elif existing.direction == direction:
-            delta = 0  # idempotent re-vote
         else:
-            existing.direction = direction
-            delta = 2 * direction  # flip: undo the old vote and apply the new
+            existing.direction = direction  # same direction = no-op, opposite = flip
 
-        attr.value = max(0, min(100, attr.value + VOTE_STEP * delta))
         await self.session.commit()
         return attr.value
+
+    async def recalculate_attributes(self) -> int:
+        """Fold all votes into the displayed values (the periodic recalc):
+        value = clamp(base_value + VOTE_STEP * net votes). Returns how many
+        rows actually changed."""
+        changed = await self.dishes.recalculate_values(VOTE_STEP)
+        await self.session.commit()
+        return changed
+
+    async def my_votes(self, dish_id: uuid.UUID, user_id: uuid.UUID) -> dict[str, int] | None:
+        """The user's standing votes per votable kind ({"spice": 1, ...}).
+
+        Values only move on periodic recalculation, so the client can't infer
+        its own vote from them — this is what the "you already voted" arrow
+        state is built from. Returns None when the dish doesn't exist.
+        """
+        if await self.dishes.get(dish_id) is None:
+            return None
+        votes: dict[str, int] = {}
+        for kind in ("spice", "price"):
+            attr = await self.dishes.get_attribute(dish_id, kind)
+            if attr is None:
+                continue
+            vote = await self.votes.get(attr.id, user_id)
+            if vote is not None:
+                votes[kind] = vote.direction
+        return votes
 
     async def add_user_photo(
         self, dish_id: uuid.UUID, data: bytes, content_type: str | None
