@@ -35,21 +35,21 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from app.config import settings
 from app.db import get_session
 from app.models import Base
-from app.routers import currencies, health, preferences
+from app.routers import currencies, health, menus, preferences
 
 
 def _build_test_app() -> FastAPI:
-    """A minimal app with just the routers the currency tests exercise.
+    """A minimal app with just the routers the tests exercise.
 
-    We deliberately don't import `app.main`: it also wires the menus router,
-    which currently fails to import (app/routers/menus.py imports
-    `schedule_menu_processing`, absent from app/tasks.py). Mounting only what
-    we test keeps this suite independent of that unrelated breakage.
+    We deliberately don't import `app.main`: it wires static-file mounts and
+    routers (dishes, restrictions) irrelevant to these tests. Mounting only
+    what we test keeps the suite fast and focused.
     """
     test_app = FastAPI()
     test_app.include_router(health.router)
     test_app.include_router(currencies.router)
     test_app.include_router(preferences.router)
+    test_app.include_router(menus.router)
     return test_app
 
 
@@ -96,16 +96,19 @@ async def _ensure_test_database() -> None:
 
 @pytest_asyncio.fixture
 async def engine():
-    """A test-database engine with the schema created.
+    """A test-database engine with a fresh schema matching the current models.
 
-    `create_all` is idempotent (checkfirst), so recreating per test is cheap
-    after the first run; the SAVEPOINT rollback keeps the tables empty anyway.
+    Drop-then-create (rather than plain `create_all`, which skips existing
+    tables) so a model change is always reflected — otherwise a table left
+    over from an earlier run keeps its old columns. The SAVEPOINT rollback in
+    `db_session` keeps rows out between tests; this handles schema drift.
     """
     await _ensure_test_database()
     eng = create_async_engine(_test_database_url())
     async with eng.begin() as conn:
         # ORM models declare pgvector columns; the type needs the extension.
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
     yield eng
     await eng.dispose()
@@ -132,6 +135,13 @@ async def db_session(engine) -> AsyncSession:
         await session.close()
         await trans.rollback()
         await connection.close()
+
+
+@pytest_asyncio.fixture
+def app_with_overrides() -> FastAPI:
+    """The app instance the client serves — hand it to tests that need to
+    register their own dependency overrides (e.g. injecting a fake storage)."""
+    return app
 
 
 @pytest_asyncio.fixture
