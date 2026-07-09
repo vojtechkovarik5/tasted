@@ -28,14 +28,24 @@ async def _item_out(
     menu_price = approx_price = None
     if item.menu_price is not None and item.menu_price_currency:
         menu_price = Money(amount=float(item.menu_price), currency=item.menu_price_currency)
-        converted = await currencies.convert(
-            item.menu_price, item.menu_price_currency, target_currency
-        )
-        if converted is not None:
-            approx_price = Money(amount=round(float(converted), 2), currency=target_currency)
+        # No approx twin when the menu already prints the user's currency.
+        if item.menu_price_currency != target_currency:
+            converted = await currencies.convert(
+                item.menu_price, item.menu_price_currency, target_currency
+            )
+            if converted is not None:
+                approx_price = Money(
+                    amount=round(float(converted), 2), currency=target_currency
+                )
     return MenuItemOut(
         id=item.id,
         original_name=item.original_name,
+        menu_number=item.menu_number,
+        translated_name=item.translated_name,
+        menu_description=item.menu_description,
+        menu_description_translated=item.menu_description_translated,
+        group_name=item.group_name,
+        group_name_translated=item.group_name_translated,
         status=MenuItemStatus(item.status),
         menu_price=menu_price,
         approx_price=approx_price,

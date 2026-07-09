@@ -109,7 +109,23 @@ class ScanItem(Base):
         ForeignKey("scans.id", ondelete="CASCADE"), index=True
     )
     position: Mapped[int] = mapped_column(Integer)  # order on the page, drives "1 of 12" paging
-    original_name: Mapped[str] = mapped_column(String(255))  # exactly as printed
+    # The name in the menu's own language, inline printed translations and
+    # numbering stripped ("Chả Giò Tôm Thịt", not "1. ... Shrimp and Pork
+    # Egg Rolls"). The printed list number/code lives in `menu_number`.
+    original_name: Mapped[str] = mapped_column(String(255))
+    menu_number: Mapped[str | None] = mapped_column(String(16))
+    # Translation into the scanning user's language — only when translating is
+    # meaningful (descriptive names); proper dish names stay null.
+    translated_name: Mapped[str | None] = mapped_column(String(255))
+    # Ingredients/description as printed on the menu + its user-language
+    # translation. Per-scan (this restaurant's wording), NOT canonical dish
+    # data — the listing mirrors the menu, the dish detail stays shared.
+    menu_description: Mapped[str | None] = mapped_column(Text)
+    menu_description_translated: Mapped[str | None] = mapped_column(Text)
+    # Menu section the item was printed under ("Bún", "Drinks"), original +
+    # user-language translation. Section order falls out of item positions.
+    group_name: Mapped[str | None] = mapped_column(String(255))
+    group_name_translated: Mapped[str | None] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(16), default="pending")  # ready | pending | failed
     # Price as printed on the menu; conversion to the user's currency happens at read time.
     menu_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))

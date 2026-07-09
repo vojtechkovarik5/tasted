@@ -27,8 +27,10 @@ from app.domain import (
     Allergen,
     DietaryFlag,
     DishInfo,
+    ExtractedGroup,
     ExtractedMenuItem,
     Language,
+    Macros,
     MenuExtraction,
     SuggestedQuestions,
     TranslatedQuestions,
@@ -38,10 +40,10 @@ from app.llm.clients import get_chat_client, get_embeddings_client
 from app.llm.prompts import (
     ENRICH_SYSTEM,
     EXTRACT_SYSTEM,
-    EXTRACT_USER,
     SUGGEST_QUESTIONS_SYSTEM,
     TRANSLATE_QUESTIONS_SYSTEM,
     enrich_user,
+    extract_user,
     suggest_questions_user,
     translate_questions_user,
 )
@@ -49,12 +51,24 @@ from app.models import EMBEDDING_DIM
 
 
 class MenuAI(Protocol):
-    async def extract_menu(self, image: bytes, extract_menumedia_type: str | None) -> MenuExtraction:
-        """First pass over a menu photo: list what's printed, nothing more."""
+    async def extract_menu(
+        self, image: bytes, media_type: str | None, *, user_language: Language = Language.en
+    ) -> MenuExtraction:
+        """First pass over a menu photo: list what's printed (items, groups,
+        printed descriptions) plus translations into `user_language` — the
+        scanning user's preferred language."""
         ...
 
-    async def enrich_dish(self, name: str, *, hints: list[str] | None = None) -> DishInfo:
-        """Full dish knowledge for one item that missed the cache."""
+    async def enrich_dish(
+        self,
+        name: str,
+        *,
+        hints: list[str] | None = None,
+        menu_description: str | None = None,
+    ) -> DishInfo:
+        """Full canonical dish knowledge for one item that missed the cache.
+        `menu_description` is the description printed on the menu, extra
+        context only — the result describes the typical dish."""
         ...
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
@@ -66,25 +80,49 @@ class StubMenuAI:
     """Deterministic stand-in: same name -> same embedding, so cache hits
     work across scans exactly like they will with real embeddings."""
 
-    async def extract_menu(self, image: bytes, media_type: str | None) -> MenuExtraction:
+    async def extract_menu(
+        self, image: bytes, media_type: str | None, *, user_language: Language = Language.en
+    ) -> MenuExtraction:
         return MenuExtraction(
             items=[
-                ExtractedMenuItem(name="Francesinha", price=9.50, currency="EUR"),
                 ExtractedMenuItem(
-                    name="Bacalhau à Brás", price=12.00, currency="EUR",
+                    name="Francesinha",
+                    number="1",
+                    # Proper dish name — the prompt says no translation.
+                    translated_name=None,
+                    description="pão, linguiça, salsicha fresca, fiambre",
+                    translated_description="bread, linguiça, fresh sausage, ham",
+                    group="Pratos",
+                    price=9.50,
+                    currency="EUR",
+                ),
+                ExtractedMenuItem(
+                    name="Bacalhau à Brás",
+                    translated_name=None,
+                    group="Pratos",
+                    price=12.00,
+                    currency="EUR",
                     allergen_hints=["fish", "egg"],
                 ),
             ],
+            groups=[ExtractedGroup(name="Pratos", translated_name="Mains")],
             language="pt",  # the canned menu is Portuguese
         )
 
-    async def enrich_dish(self, name: str, *, hints: list[str] | None = None) -> DishInfo:
+    async def enrich_dish(
+        self,
+        name: str,
+        *,
+        hints: list[str] | None = None,
+        menu_description: str | None = None,
+    ) -> DishInfo:
         return DishInfo(
             original_name=name,
             summary=f"{name} — stub enrichment.",
             description=f"Stub description for {name}. Replace StubMenuAI with a real adapter.",
             allergens=[Allergen(name=h, probability=0.9) for h in (hints or [])],
             dietary=[DietaryFlag(name="vegetarian", probability=0.5)],
+            macros=Macros(kcal=650, protein_g=30, fat_g=35, carbs_g=50),
             spice_level=1.0,
             price_level=2.0,
         )
@@ -109,14 +147,16 @@ class OpenAIMenuAI:
     come from OpenAI sized to the dishes column (see llm/clients).
     """
 
-    async def extract_menu(self, image: bytes, media_type: str | None) -> MenuExtraction:
+    async def extract_menu(
+        self, image: bytes, media_type: str | None, *, user_language: Language = Language.en
+    ) -> MenuExtraction:
         b64 = base64.b64encode(image).decode()
         data_url = f"data:{media_type or 'image/jpeg'};base64,{b64}"
         messages = [
             SystemMessage(content=EXTRACT_SYSTEM),
             HumanMessage(
                 content=[
-                    {"type": "text", "text": EXTRACT_USER},
+                    {"type": "text", "text": extract_user(LANGUAGE_NAMES[user_language])},
                     {"type": "image_url", "image_url": {"url": data_url}},
                 ]
             ),
@@ -129,10 +169,16 @@ class OpenAIMenuAI:
             extraction.language = extraction.language.strip().lower()[:2] or None
         return extraction
 
-    async def enrich_dish(self, name: str, *, hints: list[str] | None = None) -> DishInfo:
+    async def enrich_dish(
+        self,
+        name: str,
+        *,
+        hints: list[str] | None = None,
+        menu_description: str | None = None,
+    ) -> DishInfo:
         messages = [
             SystemMessage(content=ENRICH_SYSTEM),
-            HumanMessage(content=enrich_user(name, hints)),
+            HumanMessage(content=enrich_user(name, hints, menu_description)),
         ]
         llm = get_chat_client(settings.openai_enrich_model).with_structured_output(DishInfo)
         info = await llm.ainvoke(messages)

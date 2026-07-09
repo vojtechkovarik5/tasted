@@ -12,16 +12,12 @@ import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from "rea
 
 import { MenuItem, resolveUrl, sendVote } from "../api";
 import { Bar, CircleBtn, IconMeter, PrimaryButton } from "../components";
-import { isWatched, WATCHED_DIETARY } from "../prefs";
+import { fmtMoney } from "../money";
+import { isWatched, usePrefs, watchedDietary } from "../prefs";
 import { radius, spacing, useTheme } from "../theme";
 import AskStaffSheet from "./AskStaffSheet";
 
 const VOTE_NUDGE = 0.25; // optimistic local shift per vote
-
-function fmtMoney(amount: number, currency: string): string {
-  const symbol = currency === "EUR" ? "€" : currency === "CZK" ? "Kč" : currency;
-  return currency === "EUR" ? `${symbol}${amount.toFixed(2)}` : `${Math.round(amount)} ${symbol}`;
-}
 
 /** Label + vote arrows around a fractional icon meter. */
 function LevelRow(props: {
@@ -54,10 +50,12 @@ export default function DishDetailScreen(props: {
   onOpenQuestions?: () => void;
 }) {
   const { colors } = useTheme();
+  const prefs = usePrefs();
   const { item } = props;
   const dish = item.dish!; // screen is only opened for ready items
   const info = dish.info;
   const photo = dish.photos[0];
+  const dietaryWatched = watchedDietary(prefs);
 
   // Optimistic local copies of the votable values.
   const [spice, setSpice] = useState(info.spice_level);
@@ -75,11 +73,11 @@ export default function DishDetailScreen(props: {
   const rows = [
     ...info.allergens.map((a) => ({ kind: "allergen" as const, ...a })),
     ...info.dietary.map((d) => ({ kind: "dietary" as const, ...d })),
-  ].sort((a, b) => Number(isWatched(b.name)) - Number(isWatched(a.name)));
+  ].sort((a, b) => Number(isWatched(b.name, prefs)) - Number(isWatched(a.name, prefs)));
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 120 }}>
+      <ScrollView contentContainerStyle={{ paddingBottom: 170 }}>
         {/* ── Photo header: real image when available, placeholder otherwise ── */}
         <View
           style={[
@@ -128,16 +126,25 @@ export default function DishDetailScreen(props: {
             {item.menu_price ? (
               <View style={{ alignItems: "flex-end" }}>
                 <Text style={[styles.price, { color: colors.text }]}>
-                  {fmtMoney(item.menu_price.amount, item.menu_price.currency)}
+                  {fmtMoney(item.menu_price)}
                 </Text>
                 {item.approx_price ? (
                   <Text style={{ color: colors.textMuted, fontSize: 13 }}>
-                    ≈ {fmtMoney(item.approx_price.amount, item.approx_price.currency)}
+                    ≈{" "}
+                    {fmtMoney({
+                      amount: Math.round(item.approx_price.amount),
+                      currency: item.approx_price.currency,
+                    })}
                   </Text>
                 ) : null}
               </View>
             ) : null}
           </View>
+          {info.translated_name ? (
+            <Text style={{ color: colors.textMuted, fontSize: 16, marginTop: 2 }}>
+              {info.translated_name}
+            </Text>
+          ) : null}
           {info.aliases.length > 0 ? (
             <Text style={{ color: colors.textMuted, marginTop: 2 }}>
               Also: {info.aliases.join(" · ")}
@@ -156,6 +163,30 @@ export default function DishDetailScreen(props: {
           {item.regional_note ? (
             <View style={[styles.banner, { backgroundColor: colors.warnBg }]}>
               <Text style={{ color: colors.warnText }}>★ {item.regional_note}</Text>
+            </View>
+          ) : null}
+
+          {/* ── Macros (estimated per typical serving) ── */}
+          {info.macros ? (
+            <View style={[styles.macrosRow, { backgroundColor: colors.surfaceAlt }]}>
+              {(
+                [
+                  ["kcal", info.macros.kcal, ""],
+                  ["protein", info.macros.protein_g, "g"],
+                  ["fat", info.macros.fat_g, "g"],
+                  ["carbs", info.macros.carbs_g, "g"],
+                ] as const
+              ).map(([label, value, unit]) =>
+                value != null ? (
+                  <View key={label} style={{ alignItems: "center" }}>
+                    <Text style={{ color: colors.text, fontWeight: "700" }}>
+                      {Math.round(value)}
+                      {unit}
+                    </Text>
+                    <Text style={{ color: colors.textMuted, fontSize: 11 }}>{label}</Text>
+                  </View>
+                ) : null,
+              )}
             </View>
           ) : null}
 
@@ -181,11 +212,11 @@ export default function DishDetailScreen(props: {
           </View>
 
           {rows.map((row) => {
-            const watched = isWatched(row.name);
+            const watched = isWatched(row.name, prefs);
             const isDietary = row.kind === "dietary";
             // Dietary rows show a conflict when the diet is watched but the
             // probability of satisfying it is low ("Vegetarian x 2%").
-            const conflict = isDietary && WATCHED_DIETARY.has(row.name) && row.probability < 0.5;
+            const conflict = isDietary && dietaryWatched.has(row.name) && row.probability < 0.5;
             const labelColor = watched
               ? isDietary
                 ? colors.success
@@ -283,6 +314,13 @@ const styles = StyleSheet.create({
     padding: spacing.l,
     marginTop: spacing.l,
   },
+  macrosRow: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    borderRadius: radius.m,
+    padding: spacing.l,
+    marginTop: spacing.l,
+  },
   levelRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -313,6 +351,8 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: spacing.xl,
     right: spacing.xl,
-    bottom: spacing.xl + 8,
+    // Clear of the tab bar App.tsx overlays on every screen — at the old
+    // `spacing.xl + 8` the button rendered UNDERNEATH it, untappable.
+    bottom: 96,
   },
 });

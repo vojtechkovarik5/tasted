@@ -37,15 +37,26 @@ export type Allergen = { name: string; probability: number };
 /** Probability the dish SATISFIES a diet (0.02 => almost certainly not vegetarian). */
 export type DietaryFlag = { name: string; probability: number };
 
+/** Estimated macros per typical serving; shown when the user tracks them. */
+export type Macros = {
+  kcal: number | null;
+  protein_g: number | null;
+  fat_g: number | null;
+  carbs_g: number | null;
+};
+
 export type DishInfo = {
   original_name: string;
   aliases: string[];
+  // English translation, only when the name is descriptive enough that
+  // translating helps; proper dish names (Francesinha, Phở) stay null.
   translated_name: string | null;
   summary: string | null; // one-liner for list cards
   description: string; // rich text for the detail screen
   origin: string | null;
   allergens: Allergen[];
   dietary: DietaryFlag[];
+  macros: Macros | null;
   spice_level: number; // 0..5, fractional (vote-aggregated)
   price_level: number | null; // 0..5, fractional
 };
@@ -70,10 +81,19 @@ export type MenuItemStatus = "ready" | "pending" | "failed";
 
 export type MenuItem = {
   id: string;
+  // The menu's own language, inline printed translations stripped. The
+  // *_translated twins are the scanning user's language (made once during
+  // extraction) — the listing mirrors the menu + these translations.
   original_name: string;
+  menu_number: string | null; // printed list number/code ("5", "A12")
+  translated_name: string | null; // only when translating is meaningful
+  menu_description: string | null; // ingredients/description as printed
+  menu_description_translated: string | null;
+  group_name: string | null; // menu section ("Bún", "Drinks")
+  group_name_translated: string | null;
   status: MenuItemStatus;
   menu_price: Money | null;
-  approx_price: Money | null;
+  approx_price: Money | null; // user's currency; null when same as printed
   regional_note: string | null;
   dish: Dish | null; // null while pending
 };

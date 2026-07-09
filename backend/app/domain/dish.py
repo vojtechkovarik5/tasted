@@ -19,6 +19,16 @@ class DietaryFlag(BaseModel):
     probability: float = Field(ge=0, le=1)
 
 
+class Macros(BaseModel):
+    """Estimated macros per typical serving — shown on list cards when the
+    user tracks them (Preferences.macros)."""
+
+    kcal: float | None = Field(default=None, ge=0)
+    protein_g: float | None = Field(default=None, ge=0)
+    fat_g: float | None = Field(default=None, ge=0)
+    carbs_g: float | None = Field(default=None, ge=0)
+
+
 class DishInfo(BaseModel):
     """Canonical knowledge about a single dish — the core domain model.
 
@@ -30,12 +40,16 @@ class DishInfo(BaseModel):
 
     original_name: str
     aliases: list[str] = []  # "Francesinha à moda do Porto", "little Frenchie"
+    # English translation, only when the name is descriptive enough that
+    # translating helps ("Pato com batatas" -> "Duck with potatoes"); proper
+    # dish names (Francesinha, Phở, Tiramisu) stay null.
     translated_name: str | None = None
     summary: str | None = None  # one-liner for list cards
     description: str  # rich text for the detail screen
     origin: str | None = None
     allergens: list[Allergen] = []
     dietary: list[DietaryFlag] = []
+    macros: Macros | None = None  # estimated per typical serving
     # Vote-aggregated levels — floats, rendered as partially-filled icon bars
     # (e.g. 3.17 chilis out of 5).
     spice_level: float = Field(default=0, ge=0, le=5)

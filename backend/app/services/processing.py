@@ -28,7 +28,8 @@ from decimal import Decimal
 
 from app.config import settings
 from app.db import SessionLocal
-from app.models import Menu, Scan, ScanItem
+from app.domain import ExtractedMenuItem, Language, Preferences
+from app.models import Menu, Scan, ScanItem, User
 from app.repositories import ScanRepository
 from app.services.ai import MenuAI, get_menu_ai
 from app.services.dishes import DishService
@@ -58,6 +59,9 @@ class MenuProcessor:
             scan_ids = await scans.claimable_ids(menu_id)
             if not scan_ids:
                 logger.warning("process_menu: nothing to process for menu %s", menu_id)
+            # Extraction translates into the scanning user's language; the
+            # anonymous default is English (Preferences().language).
+            user_language = await self._user_language(session, menu_id)
             for scan_id in scan_ids:
                 # Atomically claim the page (new -> processing) so a concurrent
                 # run of this task — a duplicate delivery, or a reschedule that
@@ -70,7 +74,7 @@ class MenuProcessor:
                 # leaves earlier-loaded objects expired.
                 scan = await scans.get(scan_id)
                 try:
-                    await self._process_scan(session, scans, dishes, scan)
+                    await self._process_scan(session, scans, dishes, scan, user_language)
                 except Exception:
                     # Don't sink the whole batch on one page. Statement UPDATEs
                     # (via repo) — session objects are unusable post-rollback.
@@ -92,32 +96,57 @@ class MenuProcessor:
                     await session.commit()
         return should_retry
 
+    async def _user_language(self, session, menu_id: uuid.UUID) -> Language:
+        """The menu owner's preferred language (extraction translates into
+        it). Anonymous menus fall back to the Preferences default."""
+        menu = await session.get(Menu, menu_id)
+        if menu is not None and menu.user_id is not None:
+            user = await session.get(User, menu.user_id)
+            if user is not None:
+                return Preferences.model_validate(user.prefs or {}).language
+        return Preferences().language
+
     async def _process_scan(
-        self, session, scans: ScanRepository, dishes: DishService, scan: Scan
+        self,
+        session,
+        scans: ScanRepository,
+        dishes: DishService,
+        scan: Scan,
+        user_language: Language,
     ) -> None:
         # 1. extraction — one commit, so the next poll shows every item.
         # Resumable: a rescheduled scan that already holds items (a prior run
         # died mid-enrichment) skips extraction entirely, so we never re-fetch
         # the image, re-run the vision call, or duplicate line items.
-        hints_by_name: dict[str, str | None] = {}
+        extracted_by_name: dict[str, ExtractedMenuItem] = {}
         if scan.items:
             items = list(scan.items)
         else:
-            print(scan.image_path)
             image = await self.storage.get(scan.image_path)
             media_type, _ = mimetypes.guess_type(scan.image_path)
-            extraction = await self.ai.extract_menu(image, media_type)
+            extraction = await self.ai.extract_menu(
+                image, media_type, user_language=user_language
+            )
             # The vision pass reads the menu's printed language for free —
             # keep it on the menu (first page wins) for ask-staff translations.
             if extraction.language:
                 menu = await session.get(Menu, scan.menu_id)
                 if menu.language is None:
                     menu.language = extraction.language
+            group_translations = {g.name: g.translated_name for g in extraction.groups}
             items = [
                 ScanItem(
                     scan_id=scan.id,
                     position=i,
                     original_name=extracted.name,
+                    menu_number=extracted.number,
+                    translated_name=extracted.translated_name,
+                    menu_description=extracted.description,
+                    menu_description_translated=extracted.translated_description,
+                    group_name=extracted.group,
+                    group_name_translated=(
+                        group_translations.get(extracted.group) if extracted.group else None
+                    ),
                     menu_price=(
                         Decimal(str(extracted.price)) if extracted.price is not None else None
                     ),
@@ -125,7 +154,7 @@ class MenuProcessor:
                 )
                 for i, extracted in enumerate(extraction.items)
             ]
-            hints_by_name = {e.name: e.allergen_hints for e in extraction.items}
+            extracted_by_name = {e.name: e for e in extraction.items}
             scans.add_items(items)
             await session.commit()
 
@@ -148,9 +177,13 @@ class MenuProcessor:
         # 3. enrichment pass — misses become dishes, committed per item so each
         # poll picks up whatever finished since the last one.
         for item, embedding in misses:
+            extracted = extracted_by_name.get(item.original_name)
             try:
                 info = await self.ai.enrich_dish(
-                    item.original_name, hints=hints_by_name.get(item.original_name)
+                    item.original_name,
+                    hints=extracted.allergen_hints if extracted else None,
+                    # Extra context only — canonical dish info stays generic.
+                    menu_description=item.menu_description,
                 )
                 dish = await dishes.create(info, embedding=embedding)
                 item.dish_id = dish.id

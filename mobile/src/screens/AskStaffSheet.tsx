@@ -187,11 +187,13 @@ export default function AskStaffSheet(props: {
           {/* ── Your questions ── */}
           <View style={styles.listHeader}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Your questions</Text>
-            <Pressable onPress={props.onEditQuestions} hitSlop={8}>
-              <Text style={{ color: colors.primary, fontWeight: "600", fontSize: 13 }}>
-                edit in Settings ›
-              </Text>
-            </Pressable>
+            {props.onEditQuestions ? (
+              <Pressable onPress={props.onEditQuestions} hitSlop={8}>
+                <Text style={{ color: colors.primary, fontWeight: "600", fontSize: 13 }}>
+                  edit in Settings ›
+                </Text>
+              </Pressable>
+            ) : null}
           </View>
 
           {saved && saved.length === 0 ? (

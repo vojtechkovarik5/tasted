@@ -54,17 +54,17 @@ class _InMemoryStorage:
 class _RaisingExtractAI(StubMenuAI):
     """Vision call is down — fails the whole page before any items land."""
 
-    async def extract_menu(self, image, media_type):
+    async def extract_menu(self, image, media_type, *, user_language="en"):
         raise RuntimeError("vision service unavailable")
 
 
 class _PartialEnrichAI(StubMenuAI):
     """Enrichment fails for one specific item, succeeds for the rest."""
 
-    async def enrich_dish(self, name, *, hints=None):
+    async def enrich_dish(self, name, *, hints=None, menu_description=None):
         if name == "Francesinha":
             raise RuntimeError("enrichment failed")
-        return await super().enrich_dish(name, hints=hints)
+        return await super().enrich_dish(name, hints=hints, menu_description=menu_description)
 
 
 @pytest_asyncio.fixture
@@ -175,6 +175,24 @@ class TestProcessMenu:
         assert items["Francesinha"]["price"] == Decimal("9.50")
         assert items["Francesinha"]["currency"] == "EUR"
         assert items["Bacalhau à Brás"]["price"] == Decimal("12.00")
+
+    async def test_persists_printed_details_and_group(self, sessionmaker, processor):
+        # The extraction pass now carries the menu's own wording (description)
+        # plus user-language translations and the section (group) per item.
+        menu_id, scan_id = await _seed_scan(sessionmaker)
+
+        await processor.process_menu(menu_id)
+
+        async with sessionmaker() as s:
+            scan = await s.get(Scan, scan_id)
+            by_name = {i.original_name: i for i in scan.items}
+        francesinha = by_name["Francesinha"]
+        assert francesinha.menu_number == "1"
+        assert francesinha.menu_description == "pão, linguiça, salsicha fresca, fiambre"
+        assert francesinha.menu_description_translated == "bread, linguiça, fresh sausage, ham"
+        assert francesinha.translated_name is None  # proper name, not translated
+        assert francesinha.group_name == "Pratos"
+        assert francesinha.group_name_translated == "Mains"
 
     async def test_misses_are_ingested_as_new_dishes(self, sessionmaker, processor):
         menu_id, _ = await _seed_scan(sessionmaker)

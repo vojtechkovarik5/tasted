@@ -12,11 +12,12 @@
 // Dark mode later: pass darkColors below (e.g. based on useColorScheme()).
 
 import { StatusBar } from "expo-status-bar";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { Menu, MenuItem } from "./src/api";
 import { AuthProvider } from "./src/auth";
+import { loadPrefs } from "./src/prefs";
 import DishDetailScreen from "./src/screens/DishDetailScreen";
 import MenuScreen from "./src/screens/MenuScreen";
 import MenusScreen from "./src/screens/MenusScreen";
@@ -61,6 +62,11 @@ function TabBar(props: { tab: Tab; onChange: (t: Tab) => void }) {
 
 function Root() {
   const [tab, setTab] = useState<Tab>("scan");
+  // Preferences feed listing badges + price conversion everywhere; the
+  // Profile screen refreshes the store when the user changes them.
+  useEffect(() => {
+    loadPrefs();
+  }, []);
   // Mini stack: an open menu, and optionally an open dish on top of it.
   const [openMenu, setOpenMenu] = useState<Menu | null>(null);
   const [openItem, setOpenItem] = useState<MenuItem | null>(null);

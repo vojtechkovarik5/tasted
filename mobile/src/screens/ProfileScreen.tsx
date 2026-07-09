@@ -42,6 +42,7 @@ import {
 } from "../api";
 import { useAuth } from "../auth";
 import { Card, Chip, SectionHeader } from "../components";
+import { loadPrefs } from "../prefs";
 import { radius, spacing, useTheme } from "../theme";
 
 // All chips offered in the UI; the user's saved lists decide which are on.
@@ -179,20 +180,22 @@ function SettingsView(props: { onOpenQuestions?: () => void }) {
       .catch(() => {});
   }, []);
 
-  /** Toggle a watch chip; sync the matching list to its endpoint. */
+  /** Toggle a watch chip; sync the matching list to its endpoint.
+   *  Every mutation also refreshes the shared prefs store (src/prefs.ts) so
+   *  listing badges and price conversion pick the change up immediately. */
   function toggleWatch(key: string, kind: "allergen" | "dietary") {
     if (kind === "allergen") {
       const next = restrictions.includes(key)
         ? restrictions.filter((k) => k !== key)
         : [...restrictions, key];
       setRestrictionsState(next);
-      setRestrictions(next).catch(() => {});
+      setRestrictions(next).then(loadPrefs).catch(() => {});
     } else {
       const next = dietary.includes(key)
         ? dietary.filter((k) => k !== key)
         : [...dietary, key];
       setDietaryState(next);
-      setDietary(next).catch(() => {});
+      setDietary(next).then(loadPrefs).catch(() => {});
     }
   }
 
@@ -204,7 +207,7 @@ function SettingsView(props: { onOpenQuestions?: () => void }) {
         : [...prefs.macros, m],
     };
     setPrefs(next);
-    putPreferences(next).catch(() => {});
+    putPreferences(next).then(loadPrefs).catch(() => {});
   }
 
   // Language/currency are patched via their own endpoints; mirror into `prefs`
@@ -213,14 +216,14 @@ function SettingsView(props: { onOpenQuestions?: () => void }) {
     setMyLanguageState(code);
     setOpen(null);
     setPrefs((p) => ({ ...p, language: code }));
-    setMyLanguage(code).catch(() => {});
+    setMyLanguage(code).then(loadPrefs).catch(() => {});
   }
 
   function pickCurrency(code: string) {
     setMyCurrencyState(code);
     setOpen(null);
     setPrefs((p) => ({ ...p, currency: code }));
-    setMyCurrency(code).catch(() => {});
+    setMyCurrency(code).then(loadPrefs).catch(() => {});
   }
 
   const watched = new Set([...restrictions, ...dietary]);
