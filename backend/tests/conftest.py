@@ -35,15 +35,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from app.config import settings
 from app.db import get_session
 from app.models import Base
-from app.routers import currencies, dishes, health, menus, preferences
+from app.routers import currencies, dishes, health, menus, preferences, restrictions
 
 
 def _build_test_app() -> FastAPI:
     """A minimal app with just the routers the tests exercise.
 
-    We deliberately don't import `app.main`: it wires static-file mounts and
-    the restrictions router, irrelevant to these tests. Mounting only what we
-    test keeps the suite fast and focused.
+    We deliberately don't import `app.main`: it wires static-file mounts we
+    don't need. Mounting only the routers keeps the suite fast and focused.
     """
     test_app = FastAPI()
     test_app.include_router(health.router)
@@ -51,6 +50,7 @@ def _build_test_app() -> FastAPI:
     test_app.include_router(preferences.router)
     test_app.include_router(menus.router)
     test_app.include_router(dishes.router)
+    test_app.include_router(restrictions.router)
     return test_app
 
 

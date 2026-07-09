@@ -30,20 +30,21 @@ class Language(StrEnum):
     ko = "ko"
 
 
-# English display names for the picker (kept English on purpose — see above).
+# Endonyms (each language in its own script) — the convention for a language
+# picker, so a speaker recognizes their own. The app chrome stays English.
 LANGUAGE_NAMES: dict[Language, str] = {
     Language.en: "English",
-    Language.de: "German",
-    Language.fr: "French",
-    Language.es: "Spanish",
-    Language.it: "Italian",
-    Language.pt: "Portuguese",
-    Language.nl: "Dutch",
-    Language.pl: "Polish",
-    Language.cs: "Czech",
-    Language.ja: "Japanese",
-    Language.zh: "Chinese",
-    Language.ko: "Korean",
+    Language.de: "Deutsch",
+    Language.fr: "Français",
+    Language.es: "Español",
+    Language.it: "Italiano",
+    Language.pt: "Português",
+    Language.nl: "Nederlands",
+    Language.pl: "Polski",
+    Language.cs: "Čeština",
+    Language.ja: "日本語",
+    Language.zh: "中文",
+    Language.ko: "한국어",
 }
 
 
