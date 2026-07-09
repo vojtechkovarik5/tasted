@@ -35,7 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from app.config import settings
 from app.db import get_session
 from app.models import Base
-from app.routers import currencies, dishes, health, menus, preferences, restrictions
+from app.routers import currencies, dishes, health, menus, preferences, questions, restrictions
 
 
 def _build_test_app() -> FastAPI:
@@ -51,6 +51,7 @@ def _build_test_app() -> FastAPI:
     test_app.include_router(menus.router)
     test_app.include_router(dishes.router)
     test_app.include_router(restrictions.router)
+    test_app.include_router(questions.router)
     return test_app
 
 

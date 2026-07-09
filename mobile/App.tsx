@@ -16,6 +16,7 @@ import { AuthProvider } from "./src/auth";
 import DishDetailScreen from "./src/screens/DishDetailScreen";
 import MenuScreen from "./src/screens/MenuScreen";
 import MenusScreen from "./src/screens/MenusScreen";
+import MyQuestionsScreen from "./src/screens/MyQuestionsScreen";
 import ProfileScreen from "./src/screens/ProfileScreen";
 import ScanScreen from "./src/screens/ScanScreen";
 import { lightColors, ThemeProvider, useTheme } from "./src/theme";
@@ -57,6 +58,12 @@ function Root() {
   // Logged-out users have no server-side history — their latest scan is the
   // "current menu", kept here so the Menus tab can still show it.
   const [lastScanned, setLastScanned] = useState<Menu | null>(null);
+  // My questions (from Settings) pushes over the tabs like the menu stack.
+  const [openQuestions, setOpenQuestions] = useState(false);
+
+  if (openQuestions) {
+    return <MyQuestionsScreen onBack={() => setOpenQuestions(false)} />;
+  }
 
   if (openItem) {
     return <DishDetailScreen item={openItem} onBack={() => setOpenItem(null)} />;
@@ -83,7 +90,10 @@ function Root() {
       ) : tab === "menus" ? (
         <MenusScreen localMenu={lastScanned} onOpenMenu={setOpenMenu} />
       ) : (
-        <ProfileScreen />
+        <ProfileScreen
+          onSkip={() => setTab("scan")}
+          onOpenQuestions={() => setOpenQuestions(true)}
+        />
       )}
       <TabBar tab={tab} onChange={setTab} />
     </View>

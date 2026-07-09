@@ -1,19 +1,127 @@
-# Python / backend
-backend/uploads/
-.venv/
+# Byte-compiled / optimized / DLL files
 __pycache__/
-*.pyc
-.env
-.mypy_cache/
-.ruff_cache/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+env/
+venv/
+.venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
 .pytest_cache/
 
-# Node / mobile
+# Translations
+*.mo
+*.pot
+
+# Logs
+*.log
+
+# Flask/instance data
+instance/
+.webassets-cache
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+.pybuilder/
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# Celery
+celerybeat-schedule*
+celerybeat-schedule.db
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Environments — ignore every .env variant EXCEPT the committed examples.
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Type checkers
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+
+# Linters
+.ruff_cache/
+
+# Cython debug symbols
+cython_debug/
+
+# App-local storage (uploaded menu/dish photos in local-disk fallback)
+backend/uploads/
+
+# Node / mobile (Expo / React Native)
 node_modules/
 .expo/
-dist/
-*.log
+.expo-shared/
+web-build/
+
+# SpecStory / Cursor
+.cursorindexingignore
+.specstory/*
 
 # Editors
 .idea/
 .vscode/
+
+# macOS
+.DS_Store

@@ -29,6 +29,7 @@ type AuthState = {
   isSignedIn: boolean;
   user: AuthUser | null;
   signIn: (strategy: OAuthStrategy) => Promise<void>;
+  signInWithEmail: (email: string) => Promise<void>;
   signOut: () => void;
 };
 
@@ -36,8 +37,17 @@ const AuthContext = createContext<AuthState>({
   isSignedIn: false,
   user: null,
   signIn: async () => {},
+  signInWithEmail: async () => {},
   signOut: () => {},
 });
+
+/** Initials from a display name or email local part ("jan.novak" -> "JN"). */
+function initialsOf(nameOrEmail: string): string {
+  const base = nameOrEmail.split("@")[0].replace(/[._-]+/g, " ").trim();
+  const parts = base.split(/\s+/).filter(Boolean);
+  const letters = (parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "");
+  return (letters || base.slice(0, 2)).toUpperCase();
+}
 
 export function AuthProvider(props: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -55,13 +65,24 @@ export function AuthProvider(props: { children: React.ReactNode }) {
     setAuthToken("user_stub"); // with real Clerk: await getToken()
   };
 
+  // Email magic-code path (Clerk's email-code strategy). The stub logs in
+  // immediately; real Clerk would prepare + verify a code first.
+  const signInWithEmail = async (email: string) => {
+    const local = email.split("@")[0].replace(/[._-]+/g, " ").trim();
+    const name = local.replace(/\b\w/g, (c) => c.toUpperCase()) || "You";
+    setUser({ id: "user_stub", name, email, initials: initialsOf(email) });
+    setAuthToken("user_stub");
+  };
+
   const signOut = () => {
     setUser(null);
     setAuthToken(null);
   };
 
   return (
-    <AuthContext.Provider value={{ isSignedIn: user !== null, user, signIn, signOut }}>
+    <AuthContext.Provider
+      value={{ isSignedIn: user !== null, user, signIn, signInWithEmail, signOut }}
+    >
       {props.children}
     </AuthContext.Provider>
   );

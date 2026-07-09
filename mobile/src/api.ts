@@ -101,6 +101,11 @@ export type Currency = {
   rate_per_eur: number;
 };
 
+export type Language = {
+  code: string; // ISO 639-1, "cs"
+  name: string; // endonym, "Čeština"
+};
+
 // Only spice and price are votable; allergen/dietary values are not.
 export type VoteTarget = "spice" | "price";
 
@@ -109,6 +114,7 @@ export type Preferences = {
   macros: string[];
   section_order: string[];
   currency: string;
+  language: string; // ISO 639-1; app chrome stays English, this is display-only
 };
 
 // ── Fetch helpers ───────────────────────────────────────────────────────────
@@ -126,6 +132,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   };
   const res = await fetch(`${API_URL}${path}`, { ...init, headers });
   if (!res.ok) throw new Error(`HTTP ${res.status} on ${path}`);
+  if (res.status === 204) return undefined as T; // DELETE responses have no body
   return res.json() as Promise<T>;
 }
 
@@ -224,10 +231,35 @@ export const getCurrencies = () => request<Currency[]>("/currencies");
 export const setMyCurrency = (code: string) =>
   request<{ code: string }>("/currencies", json("POST", { code }));
 
+// Language: a fixed allow-list (options from the backend), display-only for now.
+export const getLanguages = () => request<Language[]>("/preferences/languages");
+export const setMyLanguage = (code: string) =>
+  request<{ code: string }>("/preferences/language", json("POST", { code }));
+
 // Macros + section order stay on the preferences blob for now.
 export const getPreferences = () => request<Preferences>("/preferences");
 export const putPreferences = (prefs: Preferences) =>
   request<Preferences>("/preferences", json("PUT", prefs));
+
+// ── My questions (saved ask-the-staff questions, Settings -> My questions) ──
+// Written once in the user's language; the ask-staff sheet translates them
+// per menu on demand. Order matters — the sheet lists them as arranged here.
+
+export type Question = { id: string; text: string };
+
+/** LLM suggestions seeded from the "Watch out for" chips (`based_on`). */
+export type QuestionSuggestions = { based_on: string[]; questions: string[] };
+
+export const getQuestions = () => request<Question[]>("/questions");
+export const addQuestion = (text: string) =>
+  request<Question>("/questions", json("POST", { text }));
+export const deleteQuestion = (id: string) =>
+  request<void>(`/questions/${id}`, { method: "DELETE" });
+/** Persist a drag-reorder; `ids` must be the full list in its new order. */
+export const reorderQuestions = (ids: string[]) =>
+  request<Question[]>("/questions/order", json("PUT", { ids }));
+export const getQuestionSuggestions = () =>
+  request<QuestionSuggestions>("/questions/suggestions");
 
 // Fixed id of the backend's canned demo menu (see backend routers/menus.py).
 export const DEMO_MENU_ID = "00000000-0000-0000-0000-00000000aaaa";

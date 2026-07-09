@@ -22,13 +22,25 @@ from typing import Protocol
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.config import settings
-from app.domain import Allergen, DietaryFlag, DishInfo, ExtractedMenuItem, MenuExtraction
+from app.domain import (
+    LANGUAGE_NAMES,
+    Allergen,
+    DietaryFlag,
+    DishInfo,
+    ExtractedMenuItem,
+    Language,
+    MenuExtraction,
+    SuggestedQuestions,
+    WatchChip,
+)
 from app.llm.clients import get_chat_client, get_embeddings_client
 from app.llm.prompts import (
     ENRICH_SYSTEM,
     EXTRACT_SYSTEM,
     EXTRACT_USER,
+    SUGGEST_QUESTIONS_SYSTEM,
     enrich_user,
+    suggest_questions_user,
 )
 from app.models import EMBEDDING_DIM
 
@@ -130,3 +142,64 @@ def get_menu_ai() -> MenuAI:
     if settings.openai_configured:
         return OpenAIMenuAI()
     return StubMenuAI()
+
+
+class QuestionAI(Protocol):
+    """AI boundary of the "My questions" feature (Settings -> My questions):
+    suggest ask-the-staff questions from the user's "Watch out for" chips."""
+
+    async def suggest_questions(
+        self, chips: list[WatchChip], language: Language, existing: list[str]
+    ) -> list[str]:
+        """2-4 short questions in the user's language, none repeating
+        `existing` (their already-saved questions)."""
+        ...
+
+
+class StubQuestionAI:
+    """Deterministic stand-in: one templated question per watched chip, so the
+    suggestions flow (and its exclusion of saved questions) is testable
+    without an API key. Always English — the stub ignores `language`."""
+
+    async def suggest_questions(
+        self, chips: list[WatchChip], language: Language, existing: list[str]
+    ) -> list[str]:
+        taken = {q.strip().lower() for q in existing}
+        suggestions = []
+        for chip in chips:
+            if chip.kind == "dietary":
+                text = f"Can this be made {chip.key}?"
+            else:
+                text = f"Does this dish contain {chip.key}?"
+            if text.lower() not in taken:
+                suggestions.append(text)
+        return suggestions[:4]
+
+
+class OpenAIQuestionAI:
+    """ChatGPT-backed adapter, same structured-output pattern as OpenAIMenuAI."""
+
+    async def suggest_questions(
+        self, chips: list[WatchChip], language: Language, existing: list[str]
+    ) -> list[str]:
+        messages = [
+            SystemMessage(content=SUGGEST_QUESTIONS_SYSTEM),
+            HumanMessage(
+                content=suggest_questions_user(
+                    [c.key for c in chips], LANGUAGE_NAMES[language], existing
+                )
+            ),
+        ]
+        llm = get_chat_client(settings.openai_enrich_model).with_structured_output(
+            SuggestedQuestions
+        )
+        result = await llm.ainvoke(messages)
+        return result.questions[:4]
+
+
+def get_question_ai() -> QuestionAI:
+    """Suggestion adapter: OpenAI when a key is set, else the deterministic
+    stub (same policy as get_menu_ai)."""
+    if settings.openai_configured:
+        return OpenAIQuestionAI()
+    return StubQuestionAI()

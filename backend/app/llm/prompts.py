@@ -39,3 +39,32 @@ def enrich_user(name: str, hints: list[str] | None) -> str:
     if hints:
         msg += f"\nAllergens marked on the menu: {', '.join(hints)}"
     return msg
+
+
+SUGGEST_QUESTIONS_SYSTEM = """You help a traveler with dietary restrictions \
+prepare questions to ask restaurant staff about a dish.
+
+Given the restrictions they watch out for, propose 2-4 SHORT questions they \
+would plausibly want to ask about any dish — the kind that catch what a menu \
+doesn't say (shared fryer oil, hidden stock/broth ingredients, cross \
+contamination, substitutions).
+
+Rules:
+- Write every question in the requested language, phrased naturally.
+- One sentence each, ending with a question mark. No numbering, no preamble.
+- Cover the given restrictions only; don't invent others.
+- Do not repeat or trivially rephrase any of the questions the user already \
+saved (provided below).
+Return nothing but the structured list."""
+
+
+def suggest_questions_user(watch: list[str], language_name: str, existing: list[str]) -> str:
+    msg = (
+        f"Restrictions they watch out for: {', '.join(watch)}\n"
+        f"Language for the questions: {language_name}"
+    )
+    if existing:
+        msg += "\nQuestions they already saved (do not repeat):\n" + "\n".join(
+            f"- {q}" for q in existing
+        )
+    return msg

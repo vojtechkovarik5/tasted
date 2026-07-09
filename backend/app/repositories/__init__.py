@@ -8,6 +8,7 @@ from app.repositories.base import BaseRepository
 from app.repositories.currencies import CurrencyRepository
 from app.repositories.dishes import DishRepository
 from app.repositories.menus import MenuRepository
+from app.repositories.questions import QuestionRepository
 from app.repositories.scans import ScanRepository
 from app.repositories.users import UserRepository
 from app.repositories.votes import VoteRepository
@@ -17,6 +18,7 @@ __all__ = [
     "CurrencyRepository",
     "DishRepository",
     "MenuRepository",
+    "QuestionRepository",
     "ScanRepository",
     "UserRepository",
     "VoteRepository",

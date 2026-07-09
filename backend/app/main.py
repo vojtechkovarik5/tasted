@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.db import engine
-from app.routers import currencies, dishes, health, menus, preferences, restrictions
+from app.routers import currencies, dishes, health, menus, preferences, questions, restrictions
 
 
 @asynccontextmanager
@@ -36,6 +36,7 @@ app.include_router(dishes.router)
 app.include_router(menus.router)
 app.include_router(restrictions.router)
 app.include_router(preferences.router)
+app.include_router(questions.router)
 
 # Dev-only file serving for demo dish photos. Real photos will live in object
 # storage (S3/R2) and PhotoOut.url will be absolute.

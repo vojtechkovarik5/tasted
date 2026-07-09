@@ -8,6 +8,7 @@ need to hand back a plain object; API schemas wrap/reference them at the edge.
 from app.domain.dish import Allergen, DietaryFlag, DishInfo
 from app.domain.menu import ExtractedMenuItem, MenuExtraction, Money
 from app.domain.preferences import LANGUAGE_NAMES, Language, Preferences, WatchChip
+from app.domain.question import SuggestedQuestions
 
 __all__ = [
     "Allergen",
@@ -19,5 +20,6 @@ __all__ = [
     "MenuExtraction",
     "Money",
     "Preferences",
+    "SuggestedQuestions",
     "WatchChip",
 ]
