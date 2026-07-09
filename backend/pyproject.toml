@@ -25,7 +25,20 @@ dependencies = [
 [dependency-groups]
 dev = [
     "ruff>=0.7",
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
 ]
+
+[tool.pytest.ini_options]
+# Tests are async (httpx AsyncClient + async DB session); auto mode lets us
+# skip the per-test @pytest.mark.asyncio decorator. Everything runs on the
+# per-test event loop, so fixtures are function-scoped (see tests/conftest.py).
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+# The app isn't an installed package (tool.uv package = false), so put the
+# backend root on sys.path to make `import app...` work under pytest.
+pythonpath = ["."]
 
 # This is an application, not a distributable package — don't try to build/install it.
 [tool.uv]
