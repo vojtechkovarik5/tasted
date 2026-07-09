@@ -1,27 +1,38 @@
-// Scan tab: photograph a menu (several pages allowed) and send it off.
+// Scan tab (design 1a/1h): photograph a menu (several pages allowed) and
+// send it off.
 //
 // Flow:
-//   snap pages with the live camera (or pick them from the gallery)
-//   -> optional title -> postMenu(uris, title) -> onScanned(menu)
+//   snap pages with the live camera (or pick them from the phone gallery)
+//   -> postMenu(uris) -> onScanned(menu)
 //   MenuScreen then polls GET /menus/{id} while items resolve.
 //
+// Captured pages stack up left of the shutter; tapping the stack opens the
+// scan gallery (design 1g) — a bottom sheet to review & remove pages before
+// uploading. With no pages yet, that slot is a dashed "+" tile that opens
+// the phone gallery directly and "Scan" is disabled.
 // History lives on the Menus tab — deliberately not duplicated here.
 
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as ImagePicker from "expo-image-picker";
 import { useRef, useState } from "react";
 import {
+  FlatList,
   Image,
+  Modal,
   Pressable,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
 
 import { Menu, postMenu } from "../api";
-import { PrimaryButton } from "../components";
+import { CircleBtn } from "../components";
 import { radius, spacing, useTheme } from "../theme";
+
+const THUMB = { width: 44, height: 56 }; // stack slot tile, left of the shutter
+
+// The gallery grid ends with an "add more" tile (same cell, dashed).
+const ADD_TILE = "__add__";
 
 /** One corner bracket of the viewfinder frame. */
 function Corner(props: { position: "tl" | "tr" | "bl" | "br"; color: string }) {
@@ -35,13 +46,120 @@ function Corner(props: { position: "tl" | "tr" | "bl" | "br"; color: string }) {
   return <View style={[edge, offsets[props.position]]} />;
 }
 
+/** The captured pages as a little stack with a count badge (opens 1g). */
+function PageStack(props: { pages: string[]; onPress: () => void }) {
+  const { colors } = useTheme();
+  const top = props.pages[props.pages.length - 1];
+  return (
+    <Pressable onPress={props.onPress} hitSlop={8} style={[THUMB, { alignSelf: "flex-start" }]}>
+      {props.pages.length > 1 ? (
+        <View
+          style={[
+            THUMB,
+            styles.stackBehind,
+            { backgroundColor: colors.surfaceAlt, borderColor: colors.border },
+          ]}
+        />
+      ) : null}
+      <Image source={{ uri: top }} style={[THUMB, styles.tile, { borderColor: colors.border }]} />
+      <Text style={[styles.stackLabel, { color: colors.onPrimary, backgroundColor: colors.text }]}>
+        p.{props.pages.length}
+      </Text>
+      <View style={[styles.countBadge, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <Text style={{ color: colors.text, fontSize: 11, fontWeight: "700" }}>
+          {props.pages.length}
+        </Text>
+      </View>
+    </Pressable>
+  );
+}
+
+/** Scan gallery (design 1g): review & remove pages before uploading. */
+function ScanGallerySheet(props: {
+  pages: string[];
+  onRemove: (index: number) => void;
+  onAdd: () => void;
+  onClose: () => void;
+}) {
+  const { colors } = useTheme();
+  return (
+    <Modal transparent animationType="slide" visible onRequestClose={props.onClose}>
+      <View style={[styles.backdrop, { backgroundColor: colors.overlay }]}>
+        <Pressable style={{ flex: 1 }} onPress={props.onClose} />
+        <View style={[styles.sheet, { backgroundColor: colors.background }]}>
+          <View style={[styles.grabber, { backgroundColor: colors.border }]} />
+          <View style={styles.sheetHeader}>
+            <Text style={[styles.sheetTitle, { color: colors.text }]}>
+              Scan gallery · {props.pages.length}
+            </Text>
+            <CircleBtn label="×" size={36} onPress={props.onClose} />
+          </View>
+          <FlatList
+            data={[...props.pages, ADD_TILE]}
+            numColumns={2}
+            keyExtractor={(item, i) => (item === ADD_TILE ? ADD_TILE : `${item}-${i}`)}
+            columnWrapperStyle={{ gap: spacing.l }}
+            // Horizontal slack so the corner badges overhang without being
+            // clipped at the list frame; the negative margin keeps the grid
+            // aligned with the header.
+            style={{ marginHorizontal: -spacing.s }}
+            contentContainerStyle={{
+              gap: spacing.l,
+              paddingTop: spacing.s,
+              paddingBottom: spacing.xl,
+              paddingHorizontal: spacing.s,
+            }}
+            renderItem={({ item, index }) =>
+              item === ADD_TILE ? (
+                <Pressable
+                  onPress={props.onAdd}
+                  style={[
+                    styles.cell,
+                    styles.addCell,
+                    // Same look as the empty stack slot next to the shutter.
+                    { borderColor: colors.textMuted, backgroundColor: colors.surfaceAlt },
+                  ]}
+                >
+                  <View style={[styles.addCircle, { borderColor: colors.textMuted }]}>
+                    <Text style={{ color: colors.text, fontSize: 18 }}>+</Text>
+                  </View>
+                  <Text style={{ color: colors.primary, fontSize: 12, fontWeight: "600", marginTop: spacing.m }}>
+                    from phone gallery
+                  </Text>
+                </Pressable>
+              ) : (
+                <View style={styles.cell}>
+                  <Image
+                    source={{ uri: item }}
+                    style={[styles.cellPhoto, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}
+                  />
+                  <Text style={[styles.cellLabel, { color: colors.textMuted }]}>
+                    page {index + 1}
+                  </Text>
+                  <Pressable
+                    onPress={() => props.onRemove(index)}
+                    hitSlop={8}
+                    style={[styles.removeBadge, { backgroundColor: colors.danger }]}
+                  >
+                    <Text style={{ color: colors.onPrimary, fontSize: 13, fontWeight: "700" }}>×</Text>
+                  </Pressable>
+                </View>
+              )
+            }
+          />
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 export default function ScanScreen(props: { onScanned: (menu: Menu) => void }) {
   const { colors } = useTheme();
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
 
-  const [title, setTitle] = useState("");
   const [pages, setPages] = useState<string[]>([]); // local photo uris, in menu order
+  const [galleryOpen, setGalleryOpen] = useState(false); // the 1g sheet
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -65,13 +183,18 @@ export default function ScanScreen(props: { onScanned: (menu: Menu) => void }) {
     }
   }
 
+  function removePage(i: number) {
+    const next = pages.filter((_, j) => j !== i);
+    setPages(next);
+    if (next.length === 0) setGalleryOpen(false); // nothing left to review
+  }
+
   async function scan() {
     setScanning(true);
     setError(null);
     try {
-      const menu = await postMenu(pages, title.trim() || undefined);
+      const menu = await postMenu(pages);
       setPages([]);
-      setTitle("");
       props.onScanned(menu);
     } catch {
       setError("Scan failed — check your connection and try again.");
@@ -80,24 +203,10 @@ export default function ScanScreen(props: { onScanned: (menu: Menu) => void }) {
     }
   }
 
+  const canScan = pages.length > 0 && !scanning;
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <Text style={[styles.title, { color: colors.text }]}>Tasted</Text>
-      <Text style={{ color: colors.textMuted, marginTop: 4 }}>
-        Snap every page of the menu, then scan once
-      </Text>
-
-      <TextInput
-        value={title}
-        onChangeText={setTitle}
-        placeholder="Title (e.g. restaurant name) — optional"
-        placeholderTextColor={colors.textMuted}
-        style={[
-          styles.titleInput,
-          { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text },
-        ]}
-      />
-
       {/* Viewfinder — live camera once permission is granted, placeholder before */}
       <View style={[styles.viewfinder, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}>
         {permission?.granted ? (
@@ -122,91 +231,102 @@ export default function ScanScreen(props: { onScanned: (menu: Menu) => void }) {
         <Corner position="br" color={colors.surface} />
       </View>
 
-      {/* Captured pages: thumbnails + a dashed "add" tile */}
-      <View style={styles.pagesRow}>
-        {pages.map((uri, i) => (
-          <Pressable key={`${uri}-${i}`} onLongPress={() => setPages((p) => p.filter((_, j) => j !== i))}>
-            <Image source={{ uri }} style={[styles.thumb, { borderColor: colors.border }]} />
-            <Text style={[styles.thumbLabel, { color: colors.onPrimary, backgroundColor: colors.text }]}>
-              p.{i + 1}
-            </Text>
-          </Pressable>
-        ))}
-        <Pressable
-          onPress={pickFromGallery}
-          style={[styles.thumb, styles.addTile, { borderColor: colors.textMuted }]}
-        >
-          <Text style={{ color: colors.textMuted, fontSize: 20 }}>+</Text>
-        </Pressable>
-        <Text style={{ color: colors.textMuted, fontSize: 12, marginLeft: "auto" }}>
-          {pages.length === 0
-            ? "no pages yet"
-            : `${pages.length} page${pages.length > 1 ? "s" : ""} · hold to remove`}
-        </Text>
-      </View>
-
-      {/* Gallery | shutter (History lives on the Menus tab) */}
-      <View style={styles.controls}>
-        <Text onPress={pickFromGallery} style={[styles.controlLabel, { color: colors.textMuted }]}>
-          Gallery
-        </Text>
-        <Pressable
-          onPress={snapPage}
-          style={[styles.shutterOuter, { borderColor: colors.text }]}
-        >
-          <View style={[styles.shutterInner, { backgroundColor: colors.text }]} />
-        </Pressable>
-        <View style={styles.controlLabel} />
-      </View>
-
       {error ? (
-        <Text style={{ color: colors.danger, textAlign: "center", marginBottom: spacing.s }}>
+        <Text style={{ color: colors.danger, textAlign: "center", marginTop: spacing.s }}>
           {error}
         </Text>
       ) : null}
 
-      <PrimaryButton
-        title={
-          scanning
-            ? "Scanning…"
-            : pages.length === 0
-              ? "Snap a page to start"
-              : `Scan ${pages.length} page${pages.length > 1 ? "s" : ""} →`
-        }
-        onPress={pages.length === 0 || scanning ? undefined : scan}
-      />
+      {/* Page stack (or "+" when empty) | shutter | Scan */}
+      <View style={styles.controls}>
+        <View style={styles.controlSlot}>
+          {pages.length > 0 ? (
+            <PageStack pages={pages} onPress={() => setGalleryOpen(true)} />
+          ) : (
+            <Pressable
+              onPress={pickFromGallery}
+              style={[THUMB, styles.tile, styles.addTile, { borderColor: colors.textMuted }]}
+            >
+              <Text style={{ color: colors.textMuted, fontSize: 20 }}>+</Text>
+            </Pressable>
+          )}
+        </View>
+        <Pressable onPress={snapPage} style={[styles.shutterOuter, { borderColor: colors.text }]}>
+          <View style={[styles.shutterInner, { backgroundColor: colors.text }]} />
+        </Pressable>
+        <View style={[styles.controlSlot, { alignItems: "flex-end" }]}>
+          <Pressable
+            onPress={canScan ? scan : undefined}
+            style={[
+              styles.scanPill,
+              { backgroundColor: canScan ? colors.chipActiveBg : colors.surfaceAlt },
+            ]}
+          >
+            <Text
+              style={{
+                color: canScan ? colors.chipActiveText : colors.textMuted,
+                fontSize: 15,
+                fontWeight: "700",
+              }}
+            >
+              {scanning ? "Scanning…" : "Scan"}
+            </Text>
+          </Pressable>
+        </View>
+      </View>
+
+      {galleryOpen ? (
+        <ScanGallerySheet
+          pages={pages}
+          onRemove={removePage}
+          onAdd={pickFromGallery}
+          onClose={() => setGalleryOpen(false)}
+        />
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: spacing.xl, paddingTop: 70, paddingBottom: 120 },
-  title: { fontSize: 30, fontWeight: "800" },
-  titleInput: {
-    marginTop: spacing.l,
-    borderWidth: 1,
-    borderRadius: radius.m,
-    paddingHorizontal: spacing.l,
-    paddingVertical: spacing.m,
-    fontSize: 15,
-  },
+  container: { flex: 1, padding: spacing.xl, paddingTop: 54, paddingBottom: 96 },
   viewfinder: {
     flex: 1,
-    marginTop: spacing.l,
     borderRadius: radius.l,
     borderWidth: 1,
     overflow: "hidden",
   },
-  placeholder: { flex: 1, alignItems: "center", justifyContent: "center" },
-  pagesRow: {
+  placeholder: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  controls: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.s,
-    marginTop: spacing.m,
-    minHeight: 56,
+    marginTop: spacing.l,
+    minHeight: THUMB.height + 10, // room for the stack's count badge
   },
-  thumb: { width: 44, height: 56, borderRadius: radius.s, borderWidth: 1 },
-  thumbLabel: {
+  controlSlot: { flex: 1, justifyContent: "center" },
+  tile: { borderRadius: radius.s, borderWidth: 1 },
+  addTile: {
+    borderStyle: "dashed",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "transparent",
+  },
+  // The sheet of paper peeking out behind the top thumbnail.
+  stackBehind: {
+    position: "absolute",
+    top: -4,
+    left: 6,
+    borderRadius: radius.s,
+    borderWidth: 1,
+  },
+  stackLabel: {
     position: "absolute",
     bottom: 4,
     left: 4,
@@ -216,20 +336,17 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     overflow: "hidden",
   },
-  addTile: {
-    borderStyle: "dashed",
+  countBadge: {
+    position: "absolute",
+    top: -8,
+    right: -8,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "transparent",
   },
-  controls: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginVertical: spacing.m,
-    paddingHorizontal: spacing.xl,
-  },
-  controlLabel: { width: 60, textAlign: "center", fontSize: 15 },
   shutterOuter: {
     width: 64,
     height: 64,
@@ -239,4 +356,72 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   shutterInner: { width: 50, height: 50, borderRadius: 25 },
+  scanPill: {
+    paddingHorizontal: spacing.xl + 4,
+    paddingVertical: spacing.m,
+    borderRadius: radius.pill,
+  },
+  // ── Scan gallery sheet (1g) ──
+  backdrop: { flex: 1, justifyContent: "flex-end" },
+  sheet: {
+    height: "74%",
+    borderTopLeftRadius: radius.l,
+    borderTopRightRadius: radius.l,
+    padding: spacing.xl,
+    paddingTop: spacing.m,
+  },
+  grabber: {
+    alignSelf: "center",
+    width: 44,
+    height: 5,
+    borderRadius: radius.pill,
+    marginBottom: spacing.m,
+  },
+  sheetHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: spacing.m,
+  },
+  sheetTitle: { fontSize: 22, fontWeight: "800" },
+  // maxWidth keeps a lone cell in the last grid row at column width.
+  cell: { flex: 1, maxWidth: "48.5%" },
+  cellPhoto: {
+    width: "100%",
+    aspectRatio: 0.78,
+    borderRadius: radius.m,
+    borderWidth: 1,
+  },
+  cellLabel: {
+    position: "absolute",
+    bottom: spacing.m,
+    alignSelf: "center",
+    fontSize: 12,
+  },
+  addCell: {
+    aspectRatio: 0.78,
+    borderRadius: radius.m,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  addCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  removeBadge: {
+    position: "absolute",
+    top: -8,
+    right: -8,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
 });

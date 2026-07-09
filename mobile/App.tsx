@@ -1,9 +1,13 @@
 // App root: theme + auth providers and a deliberately tiny "navigator".
 //
 // Tabs:    Scan (new scan) | Menus (history) | Profile
-// Stack:   MenuScreen (one menu's items) and DishDetailScreen push over the
+// Stack:   MenuScreen, DishDetailScreen and MyQuestionsScreen push over the
 //          tabs via plain React state — no navigation library yet. If the
 //          app grows, the standard upgrade is expo-router.
+//
+// The tab bar stays visible on every screen. The highlighted tab reflects
+// where the user is, stacked screens included: My questions belongs to
+// Profile, an open menu or dish to Menus. Tapping any tab pops the stack.
 //
 // Dark mode later: pass darkColors below (e.g. based on useColorScheme()).
 
@@ -19,7 +23,7 @@ import MenusScreen from "./src/screens/MenusScreen";
 import MyQuestionsScreen from "./src/screens/MyQuestionsScreen";
 import ProfileScreen from "./src/screens/ProfileScreen";
 import ScanScreen from "./src/screens/ScanScreen";
-import { lightColors, ThemeProvider, useTheme } from "./src/theme";
+import { lightColors, radius, ThemeProvider, useTheme } from "./src/theme";
 
 type Tab = "scan" | "menus" | "profile";
 
@@ -34,18 +38,23 @@ function TabBar(props: { tab: Tab; onChange: (t: Tab) => void }) {
     <View
       style={[styles.tabbar, { backgroundColor: colors.surface, borderTopColor: colors.border }]}
     >
-      {tabs.map((t) => (
-        <Pressable key={t.key} style={styles.tab} onPress={() => props.onChange(t.key)}>
-          <Text
-            style={{
-              color: props.tab === t.key ? colors.text : colors.textMuted,
-              fontWeight: props.tab === t.key ? "700" : "400",
-            }}
-          >
-            {t.label}
-          </Text>
-        </Pressable>
-      ))}
+      {tabs.map((t) => {
+        const active = props.tab === t.key;
+        return (
+          <Pressable key={t.key} style={styles.tab} onPress={() => props.onChange(t.key)}>
+            <View style={[styles.tabPill, active && { borderColor: colors.text }]}>
+              <Text
+                style={{
+                  color: active ? colors.text : colors.textMuted,
+                  fontWeight: active ? "700" : "400",
+                }}
+              >
+                {t.label}
+              </Text>
+            </View>
+          </Pressable>
+        );
+      })}
     </View>
   );
 }
@@ -61,12 +70,22 @@ function Root() {
   // My questions (from Settings) pushes over the tabs like the menu stack.
   const [openQuestions, setOpenQuestions] = useState(false);
 
-  if (openQuestions) {
-    return <MyQuestionsScreen onBack={() => setOpenQuestions(false)} />;
+  // The tab to highlight while a stacked screen is open: questions are a
+  // Profile thing, menus and dishes a Menus thing.
+  const activeTab: Tab = openQuestions ? "profile" : openItem || openMenu ? "menus" : tab;
+
+  function switchTab(t: Tab) {
+    setOpenQuestions(false);
+    setOpenItem(null);
+    setOpenMenu(null);
+    setTab(t);
   }
 
-  if (openItem) {
-    return (
+  let screen;
+  if (openQuestions) {
+    screen = <MyQuestionsScreen onBack={() => setOpenQuestions(false)} />;
+  } else if (openItem) {
+    screen = (
       <DishDetailScreen
         item={openItem}
         // Dishes are always opened from a menu; its language (read off the
@@ -77,35 +96,37 @@ function Root() {
         onOpenQuestions={() => setOpenQuestions(true)}
       />
     );
-  }
-
-  if (openMenu) {
-    return (
+  } else if (openMenu) {
+    screen = (
       <MenuScreen menu={openMenu} onOpenItem={setOpenItem} onBack={() => setOpenMenu(null)} />
+    );
+  } else if (tab === "scan") {
+    // Fresh scan: open the menu and land on the Menus tab underneath,
+    // so "back" from the result goes to history, not the scan button.
+    screen = (
+      <ScanScreen
+        onScanned={(menu) => {
+          setLastScanned(menu);
+          setOpenMenu(menu);
+          setTab("menus");
+        }}
+      />
+    );
+  } else if (tab === "menus") {
+    screen = <MenusScreen localMenu={lastScanned} onOpenMenu={setOpenMenu} />;
+  } else {
+    screen = (
+      <ProfileScreen
+        onSkip={() => setTab("scan")}
+        onOpenQuestions={() => setOpenQuestions(true)}
+      />
     );
   }
 
   return (
     <View style={{ flex: 1 }}>
-      {tab === "scan" ? (
-        // Fresh scan: open the menu and land on the Menus tab underneath,
-        // so "back" from the result goes to history, not the scan button.
-        <ScanScreen
-          onScanned={(menu) => {
-            setLastScanned(menu);
-            setOpenMenu(menu);
-            setTab("menus");
-          }}
-        />
-      ) : tab === "menus" ? (
-        <MenusScreen localMenu={lastScanned} onOpenMenu={setOpenMenu} />
-      ) : (
-        <ProfileScreen
-          onSkip={() => setTab("scan")}
-          onOpenQuestions={() => setOpenQuestions(true)}
-        />
-      )}
-      <TabBar tab={tab} onChange={setTab} />
+      {screen}
+      <TabBar tab={activeTab} onChange={switchTab} />
     </View>
   );
 }
@@ -133,5 +154,12 @@ const styles = StyleSheet.create({
     paddingBottom: 28, // home-indicator area
     paddingTop: 10,
   },
-  tab: { flex: 1, alignItems: "center", paddingVertical: 6 },
+  tab: { flex: 1, alignItems: "center" },
+  tabPill: {
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderRadius: radius.pill,
+    borderWidth: 1.5,
+    borderColor: "transparent",
+  },
 });

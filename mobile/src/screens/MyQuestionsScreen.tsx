@@ -161,7 +161,7 @@ export default function MyQuestionsScreen(props: { onBack: () => void }) {
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <ScrollView
         scrollEnabled={dragId === null}
-        contentContainerStyle={{ padding: spacing.xl, paddingTop: 70, paddingBottom: 60 }}
+        contentContainerStyle={{ padding: spacing.xl, paddingTop: 70, paddingBottom: 120 }}
       >
         {/* ── Header ── */}
         <View style={styles.headerRow}>
