@@ -13,12 +13,13 @@
 // pressed arrow just fills in ("you voted") and pressing the other arrow
 // changes the vote. GET /dishes/{id}/votes restores the marks on open.
 
+import * as ImagePicker from "expo-image-picker";
 import { useEffect, useState } from "react";
-import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
-import { getMyVotes, MenuItem, MyVotes, resolveUrl, sendVote } from "../api";
+import { getMyVotes, MenuItem, MyVotes, resolveUrl, sendVote, uploadDishPhoto } from "../api";
+import { useAuth } from "../auth";
 import { CircleBtn, IconMeter, PrimaryButton } from "../components";
-import { currencySymbol } from "../money";
 import { usePrefs, watchedAllergens, watchedDietary, watchedIngredients } from "../prefs";
 import { radius, spacing, useTheme } from "../theme";
 
@@ -120,10 +121,34 @@ export default function DishDetailScreen(props: {
 }) {
   const { colors } = useTheme();
   const prefs = usePrefs();
+  const { isSignedIn } = useAuth();
   const { item } = props;
   const dish = item.dish!; // screen is only opened for matched items
   const info = dish.info;
   const photo = dish.photos[0];
+
+  // Photo upload: goes to POST /dishes/{id}/photo, stored immediately but
+  // hidden from responses until moderation flips it to active — so the UI
+  // acknowledges the submission instead of showing the new photo.
+  const [photoNote, setPhotoNote] = useState<string | null>(null);
+  async function addPhoto() {
+    if (!isSignedIn) {
+      setPhotoNote("sign in on the Profile tab to add photos");
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      quality: 0.8,
+    });
+    if (result.canceled || !result.assets[0]?.uri) return;
+    setPhotoNote("uploading…");
+    try {
+      await uploadDishPhoto(dish.id, result.assets[0].uri);
+      setPhotoNote("✓ photo submitted — it appears once reviewed");
+    } catch {
+      setPhotoNote("upload failed — please try again");
+    }
+  }
 
   // My standing votes — drives the filled-arrow "you voted" state. Signed-out
   // users get no marks (the fetch 401s silently) and their votes are dropped
@@ -168,7 +193,7 @@ export default function DishDetailScreen(props: {
               <Text style={{ color: colors.textMuted }}>
                 {dish.canonical_name.toLowerCase()} photo
               </Text>
-              <Pressable onPress={() => Alert.alert("TODO", "photo upload")}>
+              <Pressable onPress={addPhoto}>
                 <Text style={{ color: colors.textMuted, textDecorationLine: "underline" }}>
                   or browse files
                 </Text>
@@ -186,11 +211,16 @@ export default function DishDetailScreen(props: {
             </View>
           </View>
           <Pressable
-            onPress={() => Alert.alert("TODO", "photo upload")}
+            onPress={addPhoto}
             style={[styles.addPhotoBtn, { backgroundColor: colors.surface }]}
           >
             <Text style={{ color: colors.text }}>+ Add photo</Text>
           </Pressable>
+          {photoNote ? (
+            <View style={[styles.photoNote, { backgroundColor: colors.chipActiveBg }]}>
+              <Text style={{ color: colors.chipActiveText, fontSize: 12 }}>{photoNote}</Text>
+            </View>
+          ) : null}
         </View>
 
         <View style={{ paddingHorizontal: spacing.xl }}>
@@ -301,7 +331,9 @@ export default function DishDetailScreen(props: {
           <LevelRow
             label="Price level"
             level={info.price_level ?? 0}
-            icon={currencySymbol(item.menu_price?.currency)}
+            // Always "$" — currency codes without a symbol (QAR) would
+            // render as stacked letters in the meter.
+            icon="$"
             color={colors.text}
             myVote={myVotes.price}
             onVote={(d) => voteLevel("price", d)}
@@ -411,6 +443,14 @@ const styles = StyleSheet.create({
     bottom: spacing.l,
     right: spacing.l,
     paddingHorizontal: spacing.l,
+    paddingVertical: spacing.s,
+    borderRadius: radius.pill,
+  },
+  photoNote: {
+    position: "absolute",
+    bottom: spacing.l,
+    left: spacing.l,
+    paddingHorizontal: spacing.m,
     paddingVertical: spacing.s,
     borderRadius: radius.pill,
   },

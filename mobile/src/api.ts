@@ -150,6 +150,8 @@ export type MenuSummary = {
   status: "processing" | "complete";
   created_at: string;
   item_count: number;
+  scan_count: number; // photo pages uploaded for this menu
+  language: string | null; // ISO 639-1 the menu is printed in
 };
 
 export type Currency = {
@@ -249,6 +251,14 @@ export const getMenu = (id: string) => request<Menu>(`/menus/${id}`);
 
 /** My scan history (user resolved from the auth header — no user_id param). */
 export const listMenus = () => request<MenuSummary[]>("/menus");
+
+/** Rename a menu (the pencil in the list). Empty name clears it. */
+export const renameMenu = (id: string, name: string | null) =>
+  request<MenuSummary>(`/menus/${id}`, { ...json("POST", { name }), method: "PATCH" });
+
+/** Delete a menu with its scans + items (swipe-to-delete). */
+export const deleteMenu = (id: string) =>
+  request<void>(`/menus/${id}`, { method: "DELETE" });
 
 /**
  * Poll a menu until complete. Calls `onUpdate` with every intermediate state

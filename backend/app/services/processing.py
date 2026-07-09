@@ -21,10 +21,12 @@ later (per-scan tasks).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import mimetypes
 import uuid
 from decimal import Decimal
+from itertools import islice
 
 from app.config import settings
 from app.db import SessionLocal
@@ -38,6 +40,17 @@ from app.services.storage import Storage, get_storage
 from app.services.trackables import TrackableService
 
 logger = logging.getLogger(__name__)
+
+# Enrichment calls per concurrent batch. The AI call dominates wall-clock
+# (tens of seconds each), so 5 in flight cuts a 20-item menu roughly 5x;
+# the DB ingest after each batch stays sequential (one session).
+ENRICH_BATCH_SIZE = 5
+
+
+def _chunks(items: list, size: int):
+    it = iter(items)
+    while chunk := list(islice(it, size)):
+        yield chunk
 
 
 class MenuProcessor:
@@ -188,58 +201,87 @@ class MenuProcessor:
         # item maps to a canonical dish family at all. A match is ingested
         # (family + attributes + variants + ingredient catalog entries) and
         # linked; a non-match is still `ready` — the item just stays as
-        # written, with no dish. Committed per item so each poll picks up
-        # whatever finished since the last one.
+        # written, with no dish.
+        #
+        # The AI calls are the slow part (tens of seconds each), so they run
+        # concurrently in batches of ENRICH_BATCH_SIZE; the DB ingest that
+        # follows stays sequential — one AsyncSession can't run parallel
+        # statements. Committed per item so each poll picks up whatever
+        # finished since the last one.
         trackables = TrackableService(session)
-        for item, embedding in misses:
-            extracted = extracted_by_name.get(item.original_name)
-            try:
-                enrichment = await self.ai.enrich_dish(
-                    item.original_name,
-                    hints=extracted.allergen_hints if extracted else None,
-                    # Extra context only — canonical dish info stays generic.
-                    menu_description=item.menu_description,
-                )
-                if (
-                    not enrichment.matched
-                    or enrichment.info is None
-                    or enrichment.confidence < settings.menu_match_min_confidence
-                ):
-                    item.status = "ready"  # no confident match — stays as written
-                    await session.commit()
-                    continue
-                info = enrichment.info
-                # The family name may differ from the item ("Pad Thai Gai" ->
-                # "Pad Thai") — re-check the cache under the FAMILY name so
-                # two variants scanned in a row share one family page.
-                dish = None
-                if info.original_name.strip().lower() != item.original_name.strip().lower():
-                    [family_embedding] = await self.ai.embed([info.original_name])
-                    found = await dishes.find_similar(family_embedding)
-                    if found is not None:
-                        dish = found[0]
-                    else:
-                        embedding = family_embedding  # cache under the family name
-                if dish is None:
-                    dish = await dishes.create(info, embedding=embedding)
-                    await trackables.ensure_ingredients(enrichment.ingredient_entries)
-                variant = None
-                if enrichment.variant_key:
-                    key = slugify(enrichment.variant_key)
-                    variant = next((v for v in dish.variants if v.key == key), None)
-                self._link(
-                    item,
-                    dish,
-                    round(enrichment.confidence * 100),
-                    variant or match_variant(dish, item.original_name),
-                )
-            except Exception:
-                logger.exception("enriching %r failed", item.original_name)
-                item.status = "failed"
-            await session.commit()
+        for batch in _chunks(misses, ENRICH_BATCH_SIZE):
+            enrichments = await asyncio.gather(
+                *(
+                    self.ai.enrich_dish(
+                        item.original_name,
+                        hints=(
+                            extracted.allergen_hints
+                            if (extracted := extracted_by_name.get(item.original_name))
+                            else None
+                        ),
+                        # Extra context only — canonical dish info stays generic.
+                        menu_description=item.menu_description,
+                    )
+                    for item, _ in batch
+                ),
+                return_exceptions=True,
+            )
+            for (item, embedding), enrichment in zip(batch, enrichments, strict=True):
+                try:
+                    if isinstance(enrichment, BaseException):
+                        raise enrichment
+                    await self._ingest_match(
+                        session, dishes, trackables, item, embedding, enrichment
+                    )
+                except Exception:
+                    logger.exception("enriching %r failed", item.original_name)
+                    item.status = "failed"
+                await session.commit()
 
         scan.status = "complete"
         await session.commit()
+
+    async def _ingest_match(
+        self, session, dishes: DishService, trackables: TrackableService, item, embedding, enrichment
+    ) -> None:
+        """Link one enriched item: ingest the family if it's new, else reuse
+        the cached one. Sequential per item — shares the batch's session."""
+        if (
+            not enrichment.matched
+            or enrichment.info is None
+            or enrichment.confidence < settings.menu_match_min_confidence
+        ):
+            item.status = "ready"  # no confident match — stays as written
+            return
+        info = enrichment.info
+        # The family name may differ from the item ("Pad Thai Gai" -> "Pad
+        # Thai") — re-check the cache under the FAMILY name so two variants
+        # scanned in a row share one family page. Re-checking the item
+        # embedding too covers duplicates created earlier in this batch.
+        dish = None
+        found = await dishes.find_similar(embedding)
+        if found is not None:
+            dish = found[0]
+        elif info.original_name.strip().lower() != item.original_name.strip().lower():
+            [family_embedding] = await self.ai.embed([info.original_name])
+            found = await dishes.find_similar(family_embedding)
+            if found is not None:
+                dish = found[0]
+            else:
+                embedding = family_embedding  # cache under the family name
+        if dish is None:
+            dish = await dishes.create(info, embedding=embedding)
+            await trackables.ensure_ingredients(enrichment.ingredient_entries)
+        variant = None
+        if enrichment.variant_key:
+            key = slugify(enrichment.variant_key)
+            variant = next((v for v in dish.variants if v.key == key), None)
+        self._link(
+            item,
+            dish,
+            round(enrichment.confidence * 100),
+            variant or match_variant(dish, item.original_name),
+        )
 
     @staticmethod
     def _link(item: ScanItem, dish, confidence: int, variant) -> None:

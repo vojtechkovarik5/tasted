@@ -19,7 +19,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { Menu, MenuItem, pollMenu, Preferences } from "../api";
 import { Card, CircleBtn, IconMeter, Skeleton } from "../components";
-import { currencySymbol, fmtMoney } from "../money";
+import { fmtMoney } from "../money";
 import {
   usePrefs,
   watchedAllergens,
@@ -130,12 +130,9 @@ function MatchTags(props: { item: MenuItem; prefs: Preferences }) {
       ) : null}
       {showPriceLevel ? (
         <View style={[styles.tag, styles.meterTag, { backgroundColor: colors.surface }]}>
-          <IconMeter
-            level={info.price_level!}
-            icon={currencySymbol(props.item.menu_price?.currency)}
-            iconSize={12}
-            color={colors.text}
-          />
+          {/* Always "$" — a universal "how pricy" glyph. Real currency codes
+              without a symbol (QAR) would render as stacked letters. */}
+          <IconMeter level={info.price_level!} icon="$" iconSize={12} color={colors.text} />
         </View>
       ) : null}
     </View>
@@ -306,7 +303,6 @@ function ItemCard(props: {
           <PrintedLines item={item} prefs={props.prefs} />
         </View>
         <View style={{ alignItems: "flex-end", gap: spacing.s }}>
-          <PriceCol item={item} />
           <Pressable
             onPress={(e) => {
               e?.stopPropagation?.();
@@ -319,6 +315,8 @@ function ItemCard(props: {
               🗣️ Ask
             </Text>
           </Pressable>
+          {/* Printed price + conversion to the user's currency, under Ask. */}
+          <PriceCol item={item} />
         </View>
       </View>
       {/* The optional link into the canonical world. */}

@@ -1,6 +1,6 @@
 from enum import StrEnum
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 # Mirrors User.prefs (JSONB) — the device is the source of truth (MMKV),
 # this is the sync payload once the user is logged in. Last-write-wins.
@@ -10,24 +10,18 @@ class Language(StrEnum):
     """The user's preferred language for menu explanations.
 
     A fixed allow-list (unlike currency, which is DB-driven) — the settable
-    options are exactly these. The app chrome stays English for now; this is
-    stored to drive localized dish notes later. MVP just captures the choice.
-    Codes are ISO 639-1. English is first so it leads the picker and is the
-    default.
+    options are exactly these. This is also the set every dish's translations
+    are generated for at enrichment time, so adding a language means
+    backfilling stored dishes. Codes are ISO 639-1. English is first so it
+    leads the picker and is the default (and the read-time fallback).
     """
 
     en = "en"
     de = "de"
     fr = "fr"
     es = "es"
-    it = "it"
     pt = "pt"
-    nl = "nl"
-    pl = "pl"
-    cs = "cs"
-    ja = "ja"
     zh = "zh"
-    ko = "ko"
 
 
 # Endonyms (each language in its own script) — the convention for a language
@@ -37,14 +31,8 @@ LANGUAGE_NAMES: dict[Language, str] = {
     Language.de: "Deutsch",
     Language.fr: "Français",
     Language.es: "Español",
-    Language.it: "Italiano",
     Language.pt: "Português",
-    Language.nl: "Nederlands",
-    Language.pl: "Polski",
-    Language.cs: "Čeština",
-    Language.ja: "日本語",
     Language.zh: "中文",
-    Language.ko: "한국어",
 }
 
 
@@ -78,3 +66,13 @@ class Preferences(BaseModel):
     # Preferred language for menu explanations (see Language). The app itself
     # stays English; this is display-only for now.
     language: Language = Language.en
+
+    @field_validator("language", mode="before")
+    @classmethod
+    def _fallback_removed_language(cls, value):
+        """Prefs stored while a since-removed language was supported (e.g.
+        "cs") must not break every read — fall back to English."""
+        try:
+            return Language(str(value).lower())
+        except ValueError:
+            return Language.en

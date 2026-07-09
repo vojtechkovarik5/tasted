@@ -79,22 +79,40 @@ class MenuService:
         """Scan history in the profile: the user's menus, newest first."""
         return await self.menus.list_for_user(user_id, limit=limit)
 
+    async def rename(self, menu: Menu, name: str | None) -> Menu:
+        """Set the user-facing restaurant name (the pencil in the list).
+        Empty/whitespace clears it back to null ("Untitled menu")."""
+        menu.name = (name or "").strip() or None
+        await self.session.commit()
+        return menu
+
+    async def delete(self, menu: Menu) -> None:
+        """Delete a menu with all its scans + items (DB cascades). Dish
+        knowledge is untouched — canonical dishes are shared, not owned.
+        Uploaded page images stay in storage for now (cheap, and the
+        image_sha256 cache may still want them)."""
+        await self.menus.delete(menu)
+        await self.session.commit()
+
     @staticmethod
     def combined_items(menu: Menu) -> list[ScanItem]:
         """The menu's items across all pages, in page/print order.
 
-        Items that resolved to the same dish (it appears on two pages, or the
-        same page was uploaded twice) are collapsed to their first occurrence;
-        unresolved items are always kept.
+        Duplicates (the same printed item on two pages, or the same page
+        uploaded twice) are collapsed to their first occurrence. Dedup is by
+        printed name + matched dish — NOT dish alone: different menu items
+        can share one canonical FAMILY ("Pad Thai Gai" and "Pad Thai Goong"
+        are both Pad Thai) and must all stay listed.
         """
-        seen: set[uuid.UUID] = set()
+        seen: set[tuple[uuid.UUID, str]] = set()
         items: list[ScanItem] = []
         for scan in menu.scans:
             for item in scan.items:
                 if item.dish_id is not None:
-                    if item.dish_id in seen:
+                    key = (item.dish_id, item.original_name.strip().lower())
+                    if key in seen:
                         continue
-                    seen.add(item.dish_id)
+                    seen.add(key)
                 items.append(item)
         return items
 

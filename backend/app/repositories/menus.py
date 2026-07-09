@@ -21,3 +21,7 @@ class MenuRepository(BaseRepository):
             .limit(limit)
         )
         return list((await self.session.execute(stmt)).scalars().all())
+
+    async def delete(self, menu: Menu) -> None:
+        """Stage the menu for deletion; scans + items go with it (FK CASCADE)."""
+        await self.session.delete(menu)

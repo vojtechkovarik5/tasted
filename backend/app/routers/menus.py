@@ -10,6 +10,7 @@ from app.schemas import (
     MenuItemOut,
     MenuItemStatus,
     MenuOut,
+    MenuRename,
     MenuStatus,
     MenuSummaryOut,
     MenuTagOut,
@@ -153,16 +154,55 @@ async def list_menus(user: OptionalUserDep, menus: MenuServiceDep) -> list[MenuS
     if user is None:
         return []
     rows = await menus.list_for_user(user.id)
-    return [
-        MenuSummaryOut(
-            id=m.id,
-            name=m.name,
-            status=_menu_status(m),
-            created_at=m.created_at.isoformat(),
-            item_count=len(MenuService.combined_items(m)),
-        )
-        for m in rows
-    ]
+    return [_summary_out(m) for m in rows]
+
+
+def _summary_out(menu: Menu) -> MenuSummaryOut:
+    return MenuSummaryOut(
+        id=menu.id,
+        name=menu.name,
+        status=_menu_status(menu),
+        created_at=menu.created_at.isoformat(),
+        item_count=len(MenuService.combined_items(menu)),
+        scan_count=len(menu.scans),
+        language=menu.language,
+    )
+
+
+def _accessible(menu: Menu | None, user: User | None) -> Menu:
+    """Shared access rule: an owned menu is visible only to its owner; an
+    anonymous menu is reachable by anyone holding its (unguessable) id."""
+    owned_by_someone_else = menu is not None and menu.user_id is not None and (
+        user is None or menu.user_id != user.id
+    )
+    if menu is None or owned_by_someone_else:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Menu not found")
+    return menu
+
+
+@router.patch("/menus/{menu_id}", response_model=MenuSummaryOut)
+async def rename_menu(
+    menu_id: uuid.UUID,
+    body: MenuRename,
+    user: OptionalUserDep,
+    menus: MenuServiceDep,
+) -> MenuSummaryOut:
+    """Rename a menu (the pencil next to the name in the list). Same access
+    rule as GET: the owner, or anyone holding an anonymous menu's id."""
+    menu = _accessible(await menus.get(menu_id), user)
+    return _summary_out(await menus.rename(menu, body.name))
+
+
+@router.delete("/menus/{menu_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_menu(
+    menu_id: uuid.UUID,
+    user: OptionalUserDep,
+    menus: MenuServiceDep,
+) -> None:
+    """Delete a menu with its scans and items (swipe-to-delete in the list).
+    Canonical dishes are shared knowledge and stay untouched."""
+    menu = _accessible(await menus.get(menu_id), user)
+    await menus.delete(menu)
 
 
 @router.get("/menus/{menu_id}", response_model=MenuOut)
@@ -180,10 +220,5 @@ async def get_menu(
     reachable by anyone holding its (unguessable) id — that id is the
     logged-out user's "current menu" capability.
     """
-    menu = await menus.get(menu_id)
-    owned_by_someone_else = menu is not None and menu.user_id is not None and (
-        user is None or menu.user_id != user.id
-    )
-    if menu is None or owned_by_someone_else:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Menu not found")
+    menu = _accessible(await menus.get(menu_id), user)
     return await _menu_out(menu, user, currencies, trackables)

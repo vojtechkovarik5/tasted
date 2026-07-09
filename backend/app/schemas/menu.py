@@ -90,10 +90,20 @@ class MenuOut(BaseModel):
 
 
 class MenuSummaryOut(BaseModel):
-    """One row of the user's menu history (GET /menus)."""
+    """One row of the user's menu history (GET /menus):
+    "Café Santiago · 2 scans · 12 dishes · 🇵🇹 Portuguese"."""
 
     id: uuid.UUID
     name: str | None = None
     status: MenuStatus
     created_at: str  # ISO 8601
     item_count: int
+    scan_count: int  # photo pages uploaded for this menu
+    language: str | None = None  # ISO 639-1 the menu is printed in
+
+
+class MenuRename(BaseModel):
+    """PATCH /menus/{id} body — the pencil next to the name in the list.
+    Null/empty clears the name back to "Untitled menu"."""
+
+    name: str | None = None

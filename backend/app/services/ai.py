@@ -158,9 +158,9 @@ class StubMenuAI:
             similar=["Stub Salad"],
             translations=[
                 DishTranslation(
-                    language="cs",
-                    summary=f"{name} — stub (cs).",
-                    description=f"Stub popis pro {name}.",
+                    language="de",
+                    summary=f"{name} — stub (de).",
+                    description=f"Stub-Beschreibung für {name}.",
                 )
             ],
         )
@@ -174,7 +174,7 @@ class StubMenuAI:
                     key="bread",
                     name="bread",
                     probability=0.95,
-                    translations=[NameTranslation(language="cs", name="chléb")],
+                    translations=[NameTranslation(language="de", name="Brot")],
                 )
             ],
         )
