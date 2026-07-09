@@ -27,10 +27,10 @@ The API container mounts `./app`, so code changes reload live.
 ## Run locally (without Docker)
 
 Requires a Postgres with the `pgvector` extension reachable at the
-`POSTGRES_*` connection details in `.env` (use `POSTGRES_HOST=localhost`).
+`POSTGRES_*` connection details in `.env.dev` (use `POSTGRES_HOST=localhost`).
 
 ```sh
-cp .env.example .env
+cp .env.dev.example .env.dev
 uv sync
 uv run uvicorn app.main:app --reload
 ```

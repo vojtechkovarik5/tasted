@@ -87,8 +87,8 @@ celerybeat.pid
 # SageMath parsed files
 *.sage.py
 
-# Environments — ignore every .env variant EXCEPT the committed examples.
-.env
+# Environments — ignore every .env.dev variant EXCEPT the committed examples.
+.env.dev
 .env.*
 !.env.example
 !.env.*.example

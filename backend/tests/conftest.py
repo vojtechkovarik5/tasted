@@ -17,7 +17,7 @@ The harness:
   * `client` — an httpx AsyncClient bound to the FastAPI app, with the app's
                 `get_session` dependency overridden to hand out `db_session`.
 
-Point it at a running Postgres via the usual POSTGRES_* env (see .env.example);
+Point it at a running Postgres via the usual POSTGRES_* env (see .env.dev.example);
 `docker compose up db` is enough.
 """
 

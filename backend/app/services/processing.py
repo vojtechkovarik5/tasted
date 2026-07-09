@@ -103,6 +103,7 @@ class MenuProcessor:
         if scan.items:
             items = list(scan.items)
         else:
+            print(scan.image_path)
             image = await self.storage.get(scan.image_path)
             media_type, _ = mimetypes.guess_type(scan.image_path)
             extraction = await self.ai.extract_menu(image, media_type)

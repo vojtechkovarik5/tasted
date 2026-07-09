@@ -9,10 +9,12 @@ Expo Go (a free app on your phone) runs the app over Wi-Fi.
 ```sh
 cd mobile
 npm install                 # once (already done if you just scaffolded it)
-cp .env.example .env        # then edit .env — see below
+cp .env.example .env.dev            # then edit .env.dev — see below
 ```
 
-Set `EXPO_PUBLIC_API_URL` in `.env` to a backend address your device can reach:
+`.env.dev` is loaded by `app.config.js` at startup (Expo's built-in dotenv
+doesn't read `.env.dev`, so the config file does it).
+Set `EXPO_PUBLIC_API_URL` in `.env.dev` to a backend address your device can reach:
 
 | Where you run the app | Value |
 |---|---|
@@ -45,7 +47,8 @@ mobile/
   src/screens/HomeScreen.tsx     # scan entry; renders ready cards + pending skeletons
   src/screens/DishDetailScreen.tsx  # design 1c: photo, price, spice/€, voting rows, CTA
   src/screens/ProfileScreen.tsx  # design 1d: sign-in, chips, priorities, currency
-  .env                           # your EXPO_PUBLIC_API_URL (gitignored)
+  app.config.js                  # loads .env.dev, then passes app.json through
+  .env.dev                       # your EXPO_PUBLIC_API_URL (gitignored)
 ```
 
 ## How data loads (async dishes)

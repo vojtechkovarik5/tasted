@@ -1,16 +1,18 @@
 services:
   db:
     image: pgvector/pgvector:pg17
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-tasted}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tasted}
-      POSTGRES_DB: ${POSTGRES_DB:-tasted}
+    # All stack config lives in .env.dev (single source of truth). Postgres
+    # reads POSTGRES_* from it and ignores the rest.
+    env_file:
+      - .env.dev
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tasted} -d ${POSTGRES_DB:-tasted}"]
+      # $$VAR (not ${VAR}) so the value comes from the container's env
+      # (loaded from .env.dev), not compose-time interpolation.
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -29,26 +31,17 @@ services:
 
   api:
     build: ./backend
+    # .env.dev supplies Postgres creds, APP_ENV, Clerk, S3/AWS and OpenAI.
+    # The environment block below only overrides the handful of values that
+    # must differ inside the compose network (service hostnames + in-network
+    # ports); those take precedence over env_file.
+    env_file: &backend-env-file
+      - .env.dev
     environment: &backend-env
-      POSTGRES_USER: ${POSTGRES_USER:-tasted}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tasted}
-      POSTGRES_DB: ${POSTGRES_DB:-tasted}
       POSTGRES_HOST: db          # service name on the compose network
       POSTGRES_PORT: 5432        # in-network port, not the host-published one
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      APP_ENV: ${APP_ENV:-local}
-      # Auth / storage / LLM — all optional; unset falls back to dev user,
-      # local-disk storage, and the deterministic stub AI respectively.
-      CLERK_JWKS_URL: ${CLERK_JWKS_URL:-}
-      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
-      S3_BUCKET: ${S3_BUCKET:-}
-      AWS_REGION: ${AWS_REGION:-eu-central-1}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
-      AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-}
-      S3_PUBLIC_BASE_URL: ${S3_PUBLIC_BASE_URL:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     ports:
       - "8000:8000"
     depends_on:
@@ -71,6 +64,7 @@ services:
 
   worker:
     build: ./backend
+    env_file: *backend-env-file
     environment: *backend-env
     depends_on:
       db:

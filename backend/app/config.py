@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env.dev", extra="ignore")
 
     # Postgres connection components (override via env: POSTGRES_USER, ...).
     postgres_user: str = "tasted"

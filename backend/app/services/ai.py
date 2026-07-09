@@ -49,7 +49,7 @@ from app.models import EMBEDDING_DIM
 
 
 class MenuAI(Protocol):
-    async def extract_menu(self, image: bytes, media_type: str | None) -> MenuExtraction:
+    async def extract_menu(self, image: bytes, extract_menumedia_type: str | None) -> MenuExtraction:
         """First pass over a menu photo: list what's printed, nothing more."""
         ...
 

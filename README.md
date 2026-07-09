@@ -8,7 +8,7 @@ tasted/
   backend/            # FastAPI + Postgres/pgvector (see backend/README.md)
   mobile/             # Expo / React Native app (see mobile/README.md)
   docker-compose.yml  # runs the backend stack (api + db)
-  .env.example        # Postgres credentials for docker compose
+  .env.example        # template for .env.dev (copy it); read by docker compose
 ```
 
 ## Quick start
@@ -25,7 +25,7 @@ docker compose up --build
 ```sh
 cd mobile
 npm install
-cp .env.example .env      # set EXPO_PUBLIC_API_URL to a URL your device can reach
+cp .env.dev.example .env.dev      # set EXPO_PUBLIC_API_URL to a URL your device can reach
 npm start                 # scan the QR code with the Expo Go app
 ```
 
