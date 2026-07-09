@@ -46,11 +46,6 @@ function LevelRow(props: {
       />
       <View style={{ flex: 1, alignItems: "center" }}>
         <IconMeter level={props.level} icon={props.icon} color={props.color} />
-        {props.myVote ? (
-          <Text style={{ color: colors.primary, fontSize: 11, fontWeight: "600" }}>
-            you voted {props.myVote === "up" ? "more" : "less"}
-          </Text>
-        ) : null}
       </View>
       <CircleBtn label="→" active={props.myVote === "up"} onPress={() => props.onVote("up")} />
     </View>
@@ -230,7 +225,7 @@ export default function DishDetailScreen(props: {
             {info.pronunciation ? (
               <View style={[styles.pronPill, { backgroundColor: colors.surfaceAlt }]}>
                 <Text style={{ color: colors.text, fontSize: 13 }}>
-                  🗣 {info.pronunciation}
+                  [{info.pronunciation}]
                 </Text>
               </View>
             ) : null}
@@ -280,9 +275,6 @@ export default function DishDetailScreen(props: {
                 tracked={watchedDietary(prefs)}
                 tone="diet"
               />
-              <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: spacing.s }}>
-                share of versions worldwide
-              </Text>
             </>
           ) : null}
 
@@ -313,9 +305,6 @@ export default function DishDetailScreen(props: {
                   ) : null,
                 )}
               </View>
-              <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: spacing.s }}>
-                whole-dish average across variants — AI estimate
-              </Text>
             </>
           ) : null}
 
@@ -371,11 +360,6 @@ export default function DishDetailScreen(props: {
                   );
                 })}
               </View>
-              {item.matched_variant_key ? (
-                <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: spacing.s }}>
-                  highlighted = the variant this menu item matched
-                </Text>
-              ) : null}
             </>
           ) : null}
 
@@ -387,7 +371,7 @@ export default function DishDetailScreen(props: {
                 {info.similar.map((name) => (
                   <View
                     key={name}
-                    style={[styles.variantChip, { backgroundColor: colors.surfaceAlt }]}
+                    style={[styles.variantChip, { backgroundColor: "#ffffff" }]}
                   >
                     <Text style={{ color: colors.text, fontSize: 13 }}>{name}</Text>
                   </View>
@@ -396,20 +380,8 @@ export default function DishDetailScreen(props: {
             </>
           ) : null}
 
-          {/* ── General-knowledge disclaimer ── */}
-          <View style={[styles.disclaimer, { backgroundColor: colors.surfaceAlt }]}>
-            <Text style={{ color: colors.textMuted, fontSize: 13, lineHeight: 18 }}>
-              General knowledge about the dish — this restaurant's version may differ. The
-              menu itself is the source of truth for what's on your plate.
-            </Text>
-          </View>
         </View>
       </ScrollView>
-
-      {/* ── Sticky CTA: back into the menu world ── */}
-      <View style={styles.cta}>
-        <PrimaryButton title="‹ Back to menu item" onPress={props.onBack} />
-      </View>
     </View>
   );
 }

@@ -31,9 +31,9 @@ type Tab = "scan" | "menus" | "profile";
 function TabBar(props: { tab: Tab; onChange: (t: Tab) => void }) {
   const { colors } = useTheme();
   const tabs: { key: Tab; label: string }[] = [
-    { key: "scan", label: "📷 Scan" },
-    { key: "menus", label: "🧾 Menus" },
-    { key: "profile", label: "👤 Profile" },
+    { key: "scan", label: "Scan" },
+    { key: "menus", label: "Menus" },
+    { key: "profile", label: "Profile" },
   ];
   return (
     <View
@@ -47,7 +47,6 @@ function TabBar(props: { tab: Tab; onChange: (t: Tab) => void }) {
               <Text
                 style={{
                   color: active ? colors.text : colors.textMuted,
-                  fontWeight: active ? "700" : "400",
                 }}
               >
                 {t.label}

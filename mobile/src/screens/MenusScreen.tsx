@@ -357,7 +357,6 @@ export default function MenusScreen(props: {
       contentContainerStyle={{ padding: spacing.xl, paddingTop: 70, paddingBottom: 120 }}
     >
       <Text style={[styles.title, { color: colors.text }]}>Menus</Text>
-      <Text style={{ color: colors.textMuted, marginTop: 4 }}>one menu per restaurant</Text>
 
       {error ? (
         <Text style={{ color: colors.danger, marginTop: spacing.xl }}>

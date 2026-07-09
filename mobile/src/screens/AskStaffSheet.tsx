@@ -138,7 +138,6 @@ export default function AskStaffSheet(props: {
               <Text style={[styles.title, { color: colors.text }]}>Ask the staff</Text>
               <Text style={{ color: colors.textMuted, fontSize: 13, marginTop: 2 }}>
                 about <Text style={{ fontWeight: "700" }}>{dish.canonical_name}</Text>
-                {origin ? ` · ${origin}` : ""}
               </Text>
             </View>
             <CircleBtn label="✕" onPress={props.onClose} />
@@ -153,8 +152,8 @@ export default function AskStaffSheet(props: {
               <Text
                 style={{
                   color: colors.chipActiveText,
-                  fontSize: bigger ? 40 : 28,
-                  lineHeight: bigger ? 46 : 34,
+                  fontSize: 36,
+                  lineHeight: 42,
                   fontWeight: "800",
                   marginTop: spacing.m,
                 }}
@@ -169,14 +168,6 @@ export default function AskStaffSheet(props: {
               <View style={styles.cardBtnRow}>
                 <Pressable onPress={sayIt} style={[styles.cardBtn, { borderColor: colors.chipActiveText }]}>
                   <Text style={{ color: colors.chipActiveText, fontWeight: "700" }}>🔊 Say it</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => setBigger((b) => !b)}
-                  style={[styles.cardBtn, { borderColor: colors.chipActiveText }]}
-                >
-                  <Text style={{ color: colors.chipActiveText, fontWeight: "700" }}>
-                    A⁺ {bigger ? "Smaller" : "Bigger"}
-                  </Text>
                 </Pressable>
               </View>
             </View>

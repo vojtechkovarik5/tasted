@@ -62,9 +62,6 @@ function PageStack(props: { pages: string[]; onPress: () => void }) {
         />
       ) : null}
       <Image source={{ uri: top }} style={[THUMB, styles.tile, { borderColor: colors.border }]} />
-      <Text style={[styles.stackLabel, { color: colors.onPrimary, backgroundColor: colors.text }]}>
-        p.{props.pages.length}
-      </Text>
       <View style={[styles.countBadge, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <Text style={{ color: colors.text, fontSize: 11, fontWeight: "700" }}>
           {props.pages.length}
@@ -120,12 +117,9 @@ function ScanGallerySheet(props: {
                     { borderColor: colors.textMuted, backgroundColor: colors.surfaceAlt },
                   ]}
                 >
-                  <View style={[styles.addCircle, { borderColor: colors.textMuted }]}>
-                    <Text style={{ color: colors.text, fontSize: 18 }}>+</Text>
+                  <View>
+                    <Text style={{ color: colors.text, fontSize: 36 }}>+</Text>
                   </View>
-                  <Text style={{ color: colors.primary, fontSize: 12, fontWeight: "600", marginTop: spacing.m }}>
-                    from phone gallery
-                  </Text>
                 </Pressable>
               ) : (
                 <View style={styles.cell}>

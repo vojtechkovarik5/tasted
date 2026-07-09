@@ -169,7 +169,7 @@ export default function MyQuestionsScreen(props: { onBack: () => void }) {
           <Text style={[styles.title, { color: colors.text }]}>My questions</Text>
         </View>
         <Text style={[styles.caption, { color: colors.textMuted }]}>
-          {languageName ? `written once in ${languageName} · ` : ""}translated at any table
+
         </Text>
 
         {/* ── Saved questions (drag ≡ to reorder, ✕ to remove) ── */}
@@ -242,7 +242,6 @@ export default function MyQuestionsScreen(props: { onBack: () => void }) {
           <>
             <SectionHeader
               title="✦ Suggested for you"
-              caption={`from ${suggestions.based_on.map(cap).join(" · ")}`}
             />
             {suggestions.questions.map((text) => (
               <View key={text} style={[styles.suggestionRow, { backgroundColor: colors.warnBg }]}>
@@ -257,9 +256,6 @@ export default function MyQuestionsScreen(props: { onBack: () => void }) {
                 </Pressable>
               </View>
             ))}
-            <Text style={[styles.footer, { color: colors.textMuted }]}>
-              suggestions are generated from your Watch out for list
-            </Text>
           </>
         ) : null}
       </ScrollView>

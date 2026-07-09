@@ -465,10 +465,7 @@ function SettingsView(props: { onOpenQuestions?: () => void }) {
       </Card>
 
       {/* ── What I track (design: tags on every menu item and dish) ── */}
-      <SectionHeader title="What I track" />
-      <Text style={[styles.caption, { color: colors.textMuted }]}>
-        picked things show as tags on every menu item and dish
-      </Text>
+      <SectionHeader title="What to track" />
       <Card>
         {/* Allergens — the fixed EU-14, never extendable. */}
         <TrackSection
@@ -517,9 +514,6 @@ function SettingsView(props: { onOpenQuestions?: () => void }) {
         <Pressable onPress={props.onOpenQuestions} style={styles.settingRow}>
           <View>
             <Text style={{ color: colors.text, fontSize: 15 }}>My questions</Text>
-            <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 2 }}>
-              suggested when you ask the staff
-            </Text>
           </View>
           <Text style={{ color: colors.text, fontWeight: "700" }}>
             {questionCount != null ? `${questionCount} ` : ""}›
@@ -573,14 +567,6 @@ function SettingsView(props: { onOpenQuestions?: () => void }) {
           </View>
         ) : null}
       </Card>
-      <Text style={[styles.caption, { color: colors.textMuted, marginTop: spacing.s }]}>
-        menus translate into your language · converted prices at daily rate
-      </Text>
-
-      {/* ── Footer links ── */}
-      <Text style={{ color: colors.textMuted, textAlign: "center", marginTop: spacing.xxl }}>
-        My edits & votes
-      </Text>
 
       {/* ── Log out ── */}
       <Pressable
