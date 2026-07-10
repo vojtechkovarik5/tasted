@@ -20,7 +20,7 @@ class TrackableRepository(BaseRepository):
         kind: str | None = None,
         query: str | None = None,
         include_pending_of: uuid.UUID | None = None,
-        limit: int = 100,
+        limit: int = 500,
     ) -> list[Trackable]:
         """Catalog listing: active entries, plus the caller's own pending
         suggestions (they can track them right away; nobody else sees them
