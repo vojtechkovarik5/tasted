@@ -36,7 +36,12 @@ NOT invent one. `translated_description`: the same text in the user's \
 language; null when there is no description or it's already in the user's \
 language.
 - `price`: the numeric price if shown, else null. `currency`: ISO 4217 \
-inferred from the symbol/context (€->EUR, Kč->CZK, £->GBP), else null.
+inferred from the symbol/context (€->EUR, Kč->CZK, £->GBP). When prices are \
+bare numbers with no symbol, infer the currency from the menu itself — its \
+language, script, place names, phone prefixes ("+974"->QAR) and price \
+magnitudes (a Vietnamese menu listing mains at 90,000 is VND; a Czech one \
+at 189 is CZK). Prefer the currency of the country the menu is clearly \
+from; null only when there is genuinely no signal.
 - `ingredients`: the ingredients printed for the item (its description or a \
 "contains" line), one entry each, in print order. `name` as printed (menu's \
 own language), `translated_name` in the user's language (null when identical), \
